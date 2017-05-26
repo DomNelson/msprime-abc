@@ -42,7 +42,7 @@ class TreeAncestry:
         contained in the provided tree, along with their length
         """
         length = SparseTree.interval[1] - SparseTree.interval[0]
-        ancestry_tracts = defaultdict(int)
+        ancestry_leaves = defaultdict(set)
 
         for ancestor, ancestry in self.ancestors.items():
             ##TODO: Is there a better was of checking if node is in a tree?
@@ -50,13 +50,16 @@ class TreeAncestry:
                 if SparseTree.is_internal(ancestor):
                     ## Each leaf descended from an ancestor represents a
                     ## copy of this ancestry tract
-                    num_copies = SparseTree.num_leaves(ancestor)
-                    ancestry_tracts[ancestry] += num_copies
+                    new_leaves = set(SparseTree.leaves(ancestor))
+                    ancestry_leaves[ancestry].update(new_leaves)
             except ValueError:
                 ## Raised when node is not present in tree
                 continue
 
-        return ancestry_tracts, length
+        ## Get number of unique copies of each ancestry tract
+        num_tracts = {a: len(l) for a, l in ancestry_leaves.items()}
+
+        return num_tracts, length
             
 
     def bin_ancestry_tracts(self, bins=None):
@@ -101,6 +104,9 @@ def main(args):
                             recombination_rate=1e-8, length=1e5, Ne=args.Ne)
 
     ta = TreeAncestry(ts, args.t_div, args.t_admix)
+
+    from IPython import embed; embed()
+
     print(ta.bin_ancestry_tracts(bins=20))
 
 
