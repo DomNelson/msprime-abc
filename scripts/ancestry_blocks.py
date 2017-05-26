@@ -5,10 +5,10 @@ import math
 import attr
 from collections import defaultdict, Counter
 
-def counter_to_hist(counter):
+def counter_to_hist(counter, bins=None):
     """ Converts a Counter object to a numpy histogram """
     ##TODO: Could do this without expanding the list of items
-    return np.histogram(list(counter.elements()))
+    return np.histogram(list(counter.elements()), bins=bins)
 
 
 @attr.s
@@ -18,7 +18,7 @@ class TreeAncestry:
     t_admixture = attr.ib()
 
     def __attrs_post_init__(self):
-        self.records = TreeSequence.records()
+        self.records = self.TreeSequence.records()
         self.ancestors = self.get_ancestors()
 
 
@@ -54,13 +54,13 @@ class TreeAncestry:
         return ancestry_tracts, length
             
 
-    def bin_ancestry_tracts(self, nbins=None):
+    def bin_ancestry_tracts(self, bins=None):
         """ Returns a histogram of tract lengths for each ancestry"""
         tract_lengths = defaultdict(Counter)
         tract_length_hist = {}
 
         for tree in self.TreeSequence.trees():
-            ancestry_tracts, length = get_ancestry_tracts(tree)
+            ancestry_tracts, length = self.get_ancestry_tracts(tree)
 
             ## Update the count of tract lengths within each ancestry
             for ancestry, num_copies in ancestry_tracts.items():
@@ -68,16 +68,16 @@ class TreeAncestry:
 
         ## Convert Counter object of tract lengths to histogram
         for ancestry, counts in tract_lengths.items():
-            tract_length_hist[ancestry] = counter_to_hist(counts)
+            tract_length_hist[ancestry] = counter_to_hist(counts, bins)
 
         return tract_length_hist
 
 
-admixed_sample_size = 30
-admixed_pop_size = 30
+admixed_sample_size = 300
+admixed_pop_size = 10000
 t_div = 1000
-t_admix = 50
-Ne = 1000
+t_admix = 20
+Ne = 10000
 
 ## Set parameters of admixture event
 admixed_prop = 0.7
@@ -108,5 +108,7 @@ dp.print_history()
 ## Coalescent simulation
 ts = msprime.simulate(population_configurations=population_configurations,
                         demographic_events=demographic_events,
-                        recombination_rate=1e-8, length=1e4, Ne=Ne)
+                        recombination_rate=1e-8, length=1e5, Ne=Ne)
 
+ta = TreeAncestry(ts, t_div, t_admix)
+print(ta.bin_ancestry_tracts(bins=20))
