@@ -4,6 +4,8 @@ import sys, os
 import math
 import attr
 from collections import defaultdict, Counter
+import argparse
+
 
 def counter_to_hist(counter, bins=None):
     """ Converts a Counter object to a numpy histogram """
@@ -23,9 +25,12 @@ class TreeAncestry:
 
 
     def get_ancestors(self):
-        ## Collect nodes from the source populations
+        """
+        Collect nodes from the diverged populations which formed the
+        admixed sample
+        """
         ancestry_dict = {}
-        for i, node in enumerate(ts.nodes()):
+        for i, node in enumerate(self.TreeSequence.nodes()):
             if self.t_divergence > node.time and self.t_admixture < node.time:
                 ancestry_dict[i] = node.population
 
@@ -73,42 +78,47 @@ class TreeAncestry:
         return tract_length_hist
 
 
-admixed_sample_size = 300
-admixed_pop_size = 10000
-t_div = 1000
-t_admix = 20
-Ne = 10000
+def main(args):
+    ## Initialize admixed and source populations
+    population_configurations = [
+            msprime.PopulationConfiguration(sample_size=0,
+                                            initial_size=args.Ne,
+                                            growth_rate=0),
+            msprime.PopulationConfiguration(sample_size=args.Na,
+                                            growth_rate=0)]
 
-## Set parameters of admixture event
-admixed_prop = 0.7
-A_size = admixed_sample_size * admixed_prop
-B_size = admixed_sample_size * 1 - admixed_prop
+    ## Specify admixture event
+    demographic_events = [
+            msprime.MassMigration(time=args.t_admix, source=1, destination=0,
+                                    proportion=args.admixed_prop),
+            msprime.MassMigration(time=args.t_div, source=0, destination=1,
+                                    proportion=1.)]
+            
+    ## Coalescent simulation
+    ts = msprime.simulate(population_configurations=population_configurations,
+                            demographic_events=demographic_events,
+                            recombination_rate=1e-8, length=1e5, Ne=args.Ne)
 
-## Initialize admixed and source populations
-population_configurations = [
-        msprime.PopulationConfiguration(sample_size=0,
-                                        initial_size=Ne,
-                                        growth_rate=0),
-        msprime.PopulationConfiguration(sample_size=admixed_sample_size,
-                                        growth_rate=0)]
+    ta = TreeAncestry(ts, args.t_div, args.t_admix)
+    print(ta.bin_ancestry_tracts(bins=20))
 
-## Specify admixture event
-demographic_events = [
-        msprime.MassMigration(time=t_admix, source=1, destination=0,
-                                proportion=admixed_prop),
-        msprime.MassMigration(time=t_div, source=0, destination=1,
-                                proportion=1.)]
-        
-dp = msprime.DemographyDebugger(
-    Ne=Ne,
-    population_configurations=population_configurations,
-    demographic_events=demographic_events)
-dp.print_history()
 
-## Coalescent simulation
-ts = msprime.simulate(population_configurations=population_configurations,
-                        demographic_events=demographic_events,
-                        recombination_rate=1e-8, length=1e5, Ne=Ne)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--Na", help="Size of admixed population",
+            required=True, type=int)
+    parser.add_argument("--Ne", help="Size of effective population",
+            type=int, default=10000)
+    parser.add_argument("--t_div", help="Time of divergence between source" +\
+            " populations", required=True, type=int)
+    parser.add_argument("--t_admix", help="Time of admixture event",
+            required=True, type=int)
+    parser.add_argument("--admixed_prop", help="Admixture proportion of pop 1",
+            required=True, type=float)
 
-ta = TreeAncestry(ts, t_div, t_admix)
-print(ta.bin_ancestry_tracts(bins=20))
+    args = parser.parse_args()
+
+    ## Sanity check args
+    assert 0 <= args.admixed_prop <= 1, "Invalid admixture proportion"
+
+    main(args)
