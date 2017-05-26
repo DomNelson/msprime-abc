@@ -20,7 +20,6 @@ class TreeAncestry:
     t_admixture = attr.ib()
 
     def __attrs_post_init__(self):
-        self.records = self.TreeSequence.records()
         self.ancestors = self.get_ancestors()
 
 
@@ -46,6 +45,7 @@ class TreeAncestry:
         ancestry_tracts = defaultdict(int)
 
         for ancestor, ancestry in self.ancestors.items():
+            ##TODO: Is there a better was of checking if node is in a tree?
             try:
                 if SparseTree.is_internal(ancestor):
                     ## Each leaf descended from an ancestor represents a
@@ -64,7 +64,8 @@ class TreeAncestry:
         tract_lengths = defaultdict(Counter)
         tract_length_hist = {}
 
-        for tree in self.TreeSequence.trees():
+        ##TODO: Does setting leaf_lists=True help here?
+        for tree in self.TreeSequence.trees(leaf_lists=True):
             ancestry_tracts, length = self.get_ancestry_tracts(tree)
 
             ## Update the count of tract lengths within each ancestry
