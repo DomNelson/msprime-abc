@@ -5,6 +5,7 @@ import math
 import attr
 from collections import defaultdict, Counter
 import argparse
+from profilehooks import profile
 
 
 def counter_to_hist(counter, bins=None):
@@ -46,6 +47,7 @@ class TreeAncestry:
 
         for ancestor, ancestry in self.ancestors.items():
             ##TODO: Is there a better was of checking if node is in a tree?
+            ##TODO: Probably efficiency gains to be had here
             try:
                 if SparseTree.is_internal(ancestor):
                     ## Each leaf descended from an ancestor represents a
@@ -81,7 +83,7 @@ class TreeAncestry:
 
         return tract_length_hist
 
-
+# @profile
 def main(args):
     ## Initialize admixed and source populations
     population_configurations = [
@@ -104,8 +106,8 @@ def main(args):
                             recombination_rate=1e-8, length=1e5, Ne=args.Ne)
 
     ta = TreeAncestry(ts, args.t_div, args.t_admix)
+    # from IPython import embed; embed()
 
-    from IPython import embed; embed()
 
     print(ta.bin_ancestry_tracts(bins=20))
 
