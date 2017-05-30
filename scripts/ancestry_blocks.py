@@ -20,21 +20,20 @@ class TreeAncestry:
     t_divergence = attr.ib()
     t_admixture = attr.ib()
 
+
     def __attrs_post_init__(self):
-        self.ancestors = self.get_ancestors()
+        self.nodes = list(self.TreeSequence.nodes())
 
 
-    def get_ancestors(self):
-        """
-        Collect nodes from the diverged populations which formed the
-        admixed sample
-        """
-        ancestry_dict = {}
-        for i, node in enumerate(self.TreeSequence.nodes()):
-            if self.t_divergence > node.time and self.t_admixture < node.time:
-                ancestry_dict[i] = node.population
-
-        return ancestry_dict
+    def ancestors(self, SparseTree):
+        stack = [SparseTree.get_root()]
+        while len(stack) > 0:
+            v = stack.pop()
+            ##TODO: Are all leaves time == 0?
+            if self.nodes[v].time > self.t_divergence:
+                stack.extend(reversed(SparseTree.get_children(v)))
+            elif self.nodes[v].time > self.t_admixture:
+                yield v, self.nodes[v].population
 
 
     def get_ancestry_tracts(self, SparseTree):
@@ -43,23 +42,15 @@ class TreeAncestry:
         contained in the provided tree, along with their length
         """
         length = SparseTree.interval[1] - SparseTree.interval[0]
-        ancestry_leaves = defaultdict(set)
+        num_tracts = defaultdict(int)
 
-        for ancestor, ancestry in self.ancestors.items():
-            ##TODO: Is there a better was of checking if node is in a tree?
-            ##TODO: Probably efficiency gains to be had here
-            try:
-                if SparseTree.is_internal(ancestor):
-                    ## Each leaf descended from an ancestor represents a
-                    ## copy of this ancestry tract
-                    new_leaves = set(SparseTree.leaves(ancestor))
-                    ancestry_leaves[ancestry].update(new_leaves)
-            except ValueError:
-                ## Raised when node is not present in tree
-                continue
+        for ancestor, ancestry in self.ancestors(SparseTree):
+            ## Each leaf descended from an ancestor represents a
+            ## copy of this ancestry tract
+            new_leaves = SparseTree.leaves(ancestor)
 
-        ## Get number of unique copies of each ancestry tract
-        num_tracts = {a: len(l) for a, l in ancestry_leaves.items()}
+            ## Sum elements of generator
+            num_tracts[ancestry] += np.sum([1 for _ in new_leaves])
 
         return num_tracts, length
             
@@ -106,8 +97,6 @@ def main(args):
                             recombination_rate=1e-8, length=1e5, Ne=args.Ne)
 
     ta = TreeAncestry(ts, args.t_div, args.t_admix)
-    # from IPython import embed; embed()
-
 
     print(ta.bin_ancestry_tracts(bins=20))
 
