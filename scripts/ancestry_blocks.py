@@ -30,7 +30,7 @@ class TreeAncestry:
         while len(stack) > 0:
             v = stack.pop()
             ##TODO: Are all leaves time == 0?
-            if self.nodes[v].time > self.t_divergence:
+            if self.nodes[v].time > self.t_admixture + 2:
                 stack.extend(reversed(SparseTree.get_children(v)))
             elif self.nodes[v].time > self.t_admixture:
                 yield v, self.nodes[v].population
@@ -79,26 +79,35 @@ def main(args):
     ## Initialize admixed and source populations
     population_configurations = [
             msprime.PopulationConfiguration(sample_size=0,
-                                            initial_size=args.Ne,
-                                            growth_rate=0),
+                                        initial_size=args.Na*args.admixed_prop,
+                                        growth_rate=0),
             msprime.PopulationConfiguration(sample_size=args.Na,
-                                            growth_rate=0)]
+                                        growth_rate=0)]
 
     ## Specify admixture event
     demographic_events = [
             msprime.MassMigration(time=args.t_admix, source=1, destination=0,
                                     proportion=args.admixed_prop),
-            msprime.MassMigration(time=args.t_div, source=0, destination=1,
-                                    proportion=1.)]
+            msprime.PopulationParametersChange(time=args.t_admix+1,
+                                    initial_size=1),
+            msprime.MassMigration(time=args.t_admix+2, source=0, destination=1,
+                                    proportion=1.),
+            msprime.PopulationParametersChange(time=args.t_admix+2,
+                                    initial_size=1)]
             
     ## Coalescent simulation
     ts = msprime.simulate(population_configurations=population_configurations,
                             demographic_events=demographic_events,
-                            recombination_rate=1e-8, length=1e5, Ne=args.Ne)
+                            recombination_rate=1e-8, length=1e9, Ne=1)
 
     ta = TreeAncestry(ts, args.t_div, args.t_admix)
 
     print(ta.bin_ancestry_tracts(bins=20))
+    # dp = msprime.DemographyDebugger(
+    #     Ne=args.Na,
+    #     population_configurations=population_configurations,
+    #     demographic_events=demographic_events)
+    # dp.print_history()
 
 
 if __name__ == "__main__":
