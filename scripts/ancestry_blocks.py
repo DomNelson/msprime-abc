@@ -23,6 +23,10 @@ class TreeAncestry:
 
     def __attrs_post_init__(self):
         self.nodes = list(self.TreeSequence.nodes())
+        ## Containers holding ancestry tracts as they're constructed, and once
+        ## they are completed
+        self.current_tracts = defaultdict(dict)
+        self.tract_lengths = defaultdict(Counter)
 
 
     def ancestors(self, SparseTree):
@@ -36,40 +40,74 @@ class TreeAncestry:
                 yield v, self.nodes[v].population
 
 
-    def get_ancestry_tracts(self, SparseTree):
-        """
-        Returns a dict containing the number of tracts of each ancestry
-        contained in the provided tree, along with their length
-        """
-        length = SparseTree.interval[1] - SparseTree.interval[0]
-        num_tracts = defaultdict(int)
+    def leaf_ancestries(self, SparseTree):
+        """ Returns a dict of leaves belonging to each ancestry """
+        leaf_set = defaultdict(set)
 
         for ancestor, ancestry in self.ancestors(SparseTree):
-            ## Each leaf descended from an ancestor represents a
-            ## copy of this ancestry tract
-            new_leaves = SparseTree.leaves(ancestor)
+            leaf_set[ancestry].update(SparseTree.leaves(ancestor))
 
-            ## Sum elements of generator
-            num_tracts[ancestry] += np.sum([1 for _ in new_leaves])
+        return leaf_set
 
-        return num_tracts, length
-            
+
+    def start_new_tracts(self, length, leaf_set, ancestry):
+        """
+        Initializes new tracts for leaves which have just switched ancestry
+        """
+        current_leaves = set(self.current_tracts[ancestry].keys())
+        new_leaves = leaf_set.difference(current_leaves)
+
+        start_tracts = {t:length for t in new_leaves}
+        self.current_tracts[ancestry].update(start_tracts)
+
+
+    def increment_tracts(self, length, leaf_set, ancestry):
+        """ Extends tracts of leaves which do not change ancestry """
+        current_leaves = set(self.current_tracts[ancestry].keys())
+        for leaf in current_leaves.intersection(leaf_set):
+            self.current_tracts[ancestry][leaf] += length
+
+
+    def add_complete_tracts(self, leaf_set, ancestry):
+        """ 
+        Stores complete tracts for leaves which have jsut switched ancestry
+        """
+        current_leaves = set(self.current_tracts[ancestry].keys())
+        switch_leaves = current_leaves.difference(leaf_set)
+
+        lengths = []
+        for leaf in switch_leaves:
+            lengths.append(self.current_tracts[ancestry].pop(leaf))
+
+        self.tract_lengths[ancestry].update(lengths)
+
+
+    def set_tract_lengths(self):
+        """ Returns a Counter object of tract lengths for each ancestry """
+        for tree in self.TreeSequence.trees(leaf_lists=True):
+            ## Get the ancestries of each leaf in the tree
+            leaf_ancestries = self.leaf_ancestries(tree)
+
+            for ancestry, leaf_set in leaf_ancestries.items():
+                ## Find tracts which start in this tree and assign them the
+                ## length of the tree, possibly to be incremented later
+                self.start_new_tracts(tree.length, leaf_set, ancestry)
+
+                ## Leaves which switch ancestry mark the end of a tract
+                self.add_complete_tracts(leaf_set, ancestry)
+
+                ## Leaves which remain have their tract lengths incremented
+                ##TODO: Using a defaultdict(int) could let us increment new
+                ## tracts in the same way above, possibly saving a loop
+                self.increment_tracts(tree.length, leaf_set, ancestry)
+
 
     def bin_ancestry_tracts(self, bins=None):
         """ Returns a histogram of tract lengths for each ancestry"""
-        tract_lengths = defaultdict(Counter)
         tract_length_hist = {}
 
-        ##TODO: Does setting leaf_lists=True help here?
-        for tree in self.TreeSequence.trees(leaf_lists=True):
-            ancestry_tracts, length = self.get_ancestry_tracts(tree)
-
-            ## Update the count of tract lengths within each ancestry
-            for ancestry, num_copies in ancestry_tracts.items():
-                tract_lengths[ancestry] += {length: num_copies}
-
         ## Convert Counter object of tract lengths to histogram
-        for ancestry, counts in tract_lengths.items():
+        for ancestry, counts in self.tract_lengths.items():
             tract_length_hist[ancestry] = counter_to_hist(counts, bins)
 
         return tract_length_hist
@@ -94,9 +132,10 @@ def main(args):
     ## Coalescent simulation
     ts = msprime.simulate(population_configurations=population_configurations,
                             demographic_events=demographic_events,
-                            recombination_rate=1e-8, length=1e5, Ne=args.Ne)
+                            recombination_rate=1e-8, length=1e7, Ne=args.Ne)
 
     ta = TreeAncestry(ts, args.t_div, args.t_admix)
+    ta.set_tract_lengths()
 
     print(ta.bin_ancestry_tracts(bins=20))
 
