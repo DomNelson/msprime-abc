@@ -145,9 +145,7 @@ def main(args):
     ancestry_props = {a: l / (args.Na * args.length)
                       for a, l in ancestry_length.items()}
 
-    print(tracts)
-    print(ancestry_props)
-    # print(sum(ancestry_length.values()) / args.length)
+    return tracts, ancestry_props
 
 
 if __name__ == "__main__":
