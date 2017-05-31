@@ -17,7 +17,6 @@ def counter_to_hist(counter, bins=None):
 @attr.s
 class TreeAncestry:
     TreeSequence = attr.ib()
-    t_divergence = attr.ib()
     t_admixture = attr.ib()
 
 
@@ -34,7 +33,7 @@ class TreeAncestry:
         while len(stack) > 0:
             v = stack.pop()
             ##TODO: Are all leaves time == 0?
-            if self.nodes[v].time > self.t_divergence:
+            if self.nodes[v].time > self.t_admixture+3:
                 stack.extend(reversed(SparseTree.get_children(v)))
             elif self.nodes[v].time > self.t_admixture:
                 yield v, self.nodes[v].population
@@ -117,7 +116,7 @@ def main(args):
     ## Initialize admixed and source populations
     population_configurations = [
             msprime.PopulationConfiguration(sample_size=0,
-                                            initial_size=args.Ne,
+                                            initial_size=args.Na,
                                             growth_rate=0),
             msprime.PopulationConfiguration(sample_size=args.Na,
                                             growth_rate=0)]
@@ -126,15 +125,19 @@ def main(args):
     demographic_events = [
             msprime.MassMigration(time=args.t_admix, source=1, destination=0,
                                     proportion=args.admixed_prop),
-            msprime.MassMigration(time=args.t_div, source=0, destination=1,
-                                    proportion=1.)]
+            msprime.PopulationParametersChange(time=args.t_admix+1,
+                                    initial_size=1),
+            msprime.MassMigration(time=args.t_admix+3, source=0, destination=1,
+                                    proportion=1.),
+            msprime.PopulationParametersChange(time=args.t_admix+3,
+                                    initial_size=1)]
             
     ## Coalescent simulation
     ts = msprime.simulate(population_configurations=population_configurations,
                             demographic_events=demographic_events,
-                            recombination_rate=1e-8, length=1e7, Ne=args.Ne)
+                            recombination_rate=1e-8, length=1e8, Ne=args.Na)
 
-    ta = TreeAncestry(ts, args.t_div, args.t_admix)
+    ta = TreeAncestry(ts, args.t_admix)
     ta.set_tract_lengths()
 
     print(ta.bin_ancestry_tracts(bins=20))
@@ -144,10 +147,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--Na", help="Size of admixed population",
             required=True, type=int)
-    parser.add_argument("--Ne", help="Size of effective population",
-            type=int, default=10000)
-    parser.add_argument("--t_div", help="Time of divergence between source" +\
-            " populations", required=True, type=int)
     parser.add_argument("--t_admix", help="Time of admixture event",
             required=True, type=int)
     parser.add_argument("--admixed_prop", help="Admixture proportion of pop 1",
