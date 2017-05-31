@@ -33,7 +33,7 @@ class TreeAncestry:
         while len(stack) > 0:
             v = stack.pop()
             ##TODO: Are all leaves time == 0?
-            if self.nodes[v].time > self.t_admixture+3:
+            if self.nodes[v].time > self.t_admixture+5:
                 stack.extend(reversed(SparseTree.get_children(v)))
             elif self.nodes[v].time > self.t_admixture:
                 yield v, self.nodes[v].population
@@ -96,20 +96,20 @@ class TreeAncestry:
                 self.add_complete_tracts(leaf_set, ancestry)
 
                 ## Leaves which remain have their tract lengths incremented
-                ##TODO: Using a defaultdict(int) could let us increment new
-                ## tracts in the same way above, possibly saving a loop
                 self.increment_tracts(tree.length, leaf_set, ancestry)
 
 
     def bin_ancestry_tracts(self, bins=None):
         """ Returns a histogram of tract lengths for each ancestry"""
         tract_length_hist = {}
+        ancestry_length = {}
 
         ## Convert Counter object of tract lengths to histogram
         for ancestry, counts in self.tract_lengths.items():
             tract_length_hist[ancestry] = counter_to_hist(counts, bins)
+            ancestry_length[ancestry] = sum(counts.elements())
 
-        return tract_length_hist
+        return tract_length_hist, ancestry_length
 
 # @profile
 def main(args):
@@ -127,20 +127,27 @@ def main(args):
                                     proportion=args.admixed_prop),
             msprime.PopulationParametersChange(time=args.t_admix+1,
                                     initial_size=1),
-            msprime.MassMigration(time=args.t_admix+3, source=0, destination=1,
+            msprime.MassMigration(time=args.t_admix+5, source=0, destination=1,
                                     proportion=1.),
-            msprime.PopulationParametersChange(time=args.t_admix+3,
+            msprime.PopulationParametersChange(time=args.t_admix+5,
                                     initial_size=1)]
             
     ## Coalescent simulation
     ts = msprime.simulate(population_configurations=population_configurations,
                             demographic_events=demographic_events,
-                            recombination_rate=1e-8, length=1e8, Ne=args.Na)
+                            recombination_rate=args.rho, length=args.length,
+                            Ne=args.Na)
 
     ta = TreeAncestry(ts, args.t_admix)
     ta.set_tract_lengths()
 
-    print(ta.bin_ancestry_tracts(bins=20))
+    tracts, ancestry_length = ta.bin_ancestry_tracts(bins=20)
+    ancestry_props = {a: l / (args.Na * args.length)
+                      for a, l in ancestry_length.items()}
+
+    print(tracts)
+    print(ancestry_props)
+    # print(sum(ancestry_length.values()) / args.length)
 
 
 if __name__ == "__main__":
@@ -151,6 +158,10 @@ if __name__ == "__main__":
             required=True, type=int)
     parser.add_argument("--admixed_prop", help="Admixture proportion of pop 1",
             required=True, type=float)
+    parser.add_argument("--length", help="Length in base pairs to simulate",
+            required=True, type=float)
+    parser.add_argument("--rho", help="Recombination rate per base pair, " +\
+            "default=1e-8", type=float, default=1e-8)
 
     args = parser.parse_args()
 
