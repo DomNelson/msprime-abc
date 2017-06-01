@@ -35,7 +35,7 @@ class TreeAncestry:
         while len(stack) > 0:
             v = stack.pop()
             ##TODO: Are all leaves time == 0?
-            if self.nodes[v].time > self.CLI_args.t_admix + 5:
+            if self.nodes[v].time == self.CLI_args.t_admix + 3:
                 stack.extend(reversed(SparseTree.get_children(v)))
             elif self.nodes[v].time > self.CLI_args.t_admix:
                 yield v, self.nodes[v].population
@@ -139,12 +139,14 @@ def main(args):
     demographic_events = [
             msprime.MassMigration(time=args.t_admix, source=1, destination=0,
                                     proportion=args.admixed_prop),
-            msprime.PopulationParametersChange(time=args.t_admix+1,
-                                    initial_size=1),
-            msprime.MassMigration(time=args.t_admix+5, source=0, destination=1,
+            msprime.SimpleBottleneck(time=args.t_admix+1, population_id=0,
+                                    proportion=1.0),
+            msprime.SimpleBottleneck(time=args.t_admix+1, population_id=1,
+                                    proportion=1.0),
+            msprime.MassMigration(time=args.t_admix+2, source=0, destination=1,
                                     proportion=1.),
-            msprime.PopulationParametersChange(time=args.t_admix+5,
-                                    initial_size=1)]
+            msprime.SimpleBottleneck(time=args.t_admix+3, population_id=1,
+                                    proportion=1.0)]
             
     ## Coalescent simulation
     ts = msprime.simulate(population_configurations=population_configurations,
