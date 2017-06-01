@@ -8,20 +8,22 @@ import argparse
 from profilehooks import profile
 
 
-def counter_to_hist(counter, bins=None):
-    """ Converts a Counter object to a numpy histogram """
-    ##TODO: Could do this without expanding the list of items
-    return np.histogram(list(counter.elements()), bins=bins)
+def get_bin_edges(length, nbins):
+    bin_width = length / nbins
+    bin_edges = np.concatenate([np.arange(0, length, bin_width), [length]])
+
+    return bin_edges
 
 
 @attr.s
 class TreeAncestry:
     TreeSequence = attr.ib()
-    t_admixture = attr.ib()
+    CLI_args = attr.ib()
 
 
     def __attrs_post_init__(self):
         self.nodes = list(self.TreeSequence.nodes())
+
         ## Containers holding ancestry tracts as they're constructed, and once
         ## they are completed
         self.current_tracts = defaultdict(dict)
@@ -33,9 +35,9 @@ class TreeAncestry:
         while len(stack) > 0:
             v = stack.pop()
             ##TODO: Are all leaves time == 0?
-            if self.nodes[v].time > self.t_admixture+5:
+            if self.nodes[v].time > self.CLI_args.t_admix + 5:
                 stack.extend(reversed(SparseTree.get_children(v)))
-            elif self.nodes[v].time > self.t_admixture:
+            elif self.nodes[v].time > self.CLI_args.t_admix:
                 yield v, self.nodes[v].population
 
 
@@ -99,17 +101,29 @@ class TreeAncestry:
                 self.increment_tracts(tree.length, leaf_set, ancestry)
 
 
+    def counter_to_hist(self, counter, bins=None):
+        """ Converts a Counter object to a numpy histogram """
+        ##TODO: Could do this without expanding the list of items
+        return np.histogram(list(counter.elements()), bins=bins)
+
+
     def bin_ancestry_tracts(self, bins=None):
         """ Returns a histogram of tract lengths for each ancestry"""
-        tract_length_hist = {}
-        ancestry_length = {}
+        ## Default value is an empty histogram, if one ancestry has no
+        ## tracts in the leaves
+        empty_hist = lambda: np.histogram([], bins=bins)
+        empty_ancestry_prop = lambda: 0
+
+        tract_length_hist = defaultdict(empty_hist)
+        ancestry_props = defaultdict(empty_ancestry_prop)
 
         ## Convert Counter object of tract lengths to histogram
         for ancestry, counts in self.tract_lengths.items():
-            tract_length_hist[ancestry] = counter_to_hist(counts, bins)
-            ancestry_length[ancestry] = sum(counts.elements())
+            tract_length_hist[ancestry] = self.counter_to_hist(counts, bins)
+            ancestry_length = sum(counts.elements()) / self.CLI_args.Na
+            ancestry_props[ancestry] = ancestry_length / self.CLI_args.length
 
-        return tract_length_hist, ancestry_length
+        return tract_length_hist, ancestry_props
 
 # @profile
 def main(args):
@@ -138,12 +152,12 @@ def main(args):
                             recombination_rate=args.rho, length=args.length,
                             Ne=args.Na)
 
-    ta = TreeAncestry(ts, args.t_admix)
+    ta = TreeAncestry(ts, args)
     ta.set_tract_lengths()
 
-    tracts, ancestry_length = ta.bin_ancestry_tracts(bins=20)
-    ancestry_props = {a: l / (args.Na * args.length)
-                      for a, l in ancestry_length.items()}
+    ## Create histogram of ancestry tract lengths
+    bin_edges = get_bin_edges(args.length, args.nbins)
+    tracts, ancestry_props = ta.bin_ancestry_tracts(bins=bin_edges)
 
     return tracts, ancestry_props
 
@@ -160,6 +174,8 @@ if __name__ == "__main__":
             required=True, type=float)
     parser.add_argument("--rho", help="Recombination rate per base pair, " +\
             "default=1e-8", type=float, default=1e-8)
+    parser.add_argument("--nbins", help="Number of bins in tract-length " +\
+            "histogram. Default 10", type=int, default=10)
 
     args = parser.parse_args()
 
