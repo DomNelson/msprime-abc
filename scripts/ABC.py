@@ -26,8 +26,12 @@ def bhattacharyya_coeff(mu0, sig0, mu1, sig1):
     return term1 + term2
 
 
-def meav_var_dist(mu0, sig0, mu1, sig1):
+def mean_var_dist(mu0, sig0, mu1, sig1):
     return np.max([(mu1 - mu0) ** 2, (sig1 - sig0) ** 2])
+
+
+def mean_dist(mu0, mu1):
+    return (mu1 - mu0) ** 2
 
 
 def hist_distance(hist1, hist2):
@@ -50,29 +54,13 @@ def hist_distance(hist1, hist2):
     return scipy.spatial.distance.chebyshev(*hists)
 
 
-def pop_data_dist(data0, data1):
+def smooth_param_hist(params):
     """
-    Calculates the distance between two populations, described by their tract
-    length distribution and ancestry proportion distribution. Each aspect
-    of the distance is weighted as described in weights
+    Generate smooth parameter likelihoods to facilitate resampling.
     """
-    ##@@ Assumes two ancestries
-    a0 = data0[0]; a1 = data1[0]; h0 = data0[1]; h1 = data1[1]
+    kde = stats.gaussian_kde(np.asarray(params).T)
 
-    ## Find ancestry proportion distance
-    anc0, mv0 = next(a0.iteritems())
-    anc1, mv1 = next(a1.iteritems())
-    # a_dist = bhattacharyya_coeff(*mv0+mv1)
-    a_dist = meav_var_dist(*mv0+mv1)
-
-    ## Find tract length distribution distance
-    anc0, cb0 = next(h0.iteritems())
-    anc1, cb1 = next(h1.iteritems())
-    h_dist = hist_distance(cb0, cb1)
-
-    print("Distance components:", a_dist, h_dist)
-
-    return a_dist, h_dist
+    return kde
 
 
 ##-------------------------------------------------------------------------
@@ -85,21 +73,22 @@ class ABC:
     Na = attr.ib()
     mingens = attr.ib()
     maxgens = attr.ib()
-    n_ancestries = attr.ib(default=2)
+    ancestries = attr.ib()
+    nbins = attr.ib(default=20)
 
 
     def __attrs_post_init__(self):
-        self.colour_dict = self.make_colour_dict(self.n_ancestries)
+        self.colour_dict = self.make_colour_dict(self.ancestries)
 
 
     def set_obs_data(self, obs_data):
         self.obs_data = obs_data
 
 
-    def make_colour_dict(self, n_ancestries):
+    def make_colour_dict(self, ancestries):
         colour_list = plt.cm.Set1(np.linspace(0, 1, 12))
 
-        return dict(zip(range(n_ancestries), colour_list))
+        return dict(zip(self.ancestries, colour_list))
 
     def theta_flat_prior(self):
         """
@@ -149,7 +138,8 @@ class ABC:
                                 t_admix=t_admix,
                                 admixed_prop=admixed_prop,
                                 length=self.chromlength,
-                                rho=self.rho)
+                                rho=self.rho,
+                                nbins=self.nbins)
 
         tracts, ancestry_props = ancestry_blocks.main(args)
 
@@ -162,10 +152,10 @@ class ABC:
         dists = []
 
         while num_samples < min_samples:
-            theta = theta_flat_prior()
+            theta = self.theta_flat_prior()
             sim_data = self.generate_data(theta)
 
-            a_dist, h_dist = pop_data_dist(sim_data, self.obs_data)
+            a_dist, h_dist = self.pop_data_dist(sim_data, self.obs_data)
             dists.append([a_dist, h_dist])
 
             if a_dist < epsilon[0] and h_dist < epsilon[1]:
@@ -176,10 +166,29 @@ class ABC:
         return np.asarray(good_params), dists
 
 
-    def smooth_param_hist(self, params):
+    def pop_data_dist(self, data0, data1):
         """
-        Generate smooth parameter likelihoods to facilitate resampling.
+        Calculates the distance between two populations, described by their tract
+        length distribution and ancestry proportion distribution.
         """
-        kde = stats.gaussian_kde(np.asarray(params).T)
+        tracts0, ancestry_props0 = data0
+        tracts1, ancestry_props1 = data1
 
-        return kde
+        h_dist = 0
+        a_dist = 0
+        for ancestry in tracts1.keys():
+            ## Measure distance between tract-length histograms
+            hist0 = tracts0[ancestry]
+            hist1 = tracts1[ancestry]
+            h_dist += hist_distance(hist0, hist1)
+
+            ## Measure distance between ancestry proportions
+            prop0 = ancestry_props0[ancestry]
+            prop1 = ancestry_props1[ancestry]
+            a_dist += mean_dist(prop0, prop1)
+
+        print("Distance components:", a_dist, h_dist)
+
+        return a_dist, h_dist
+
+
