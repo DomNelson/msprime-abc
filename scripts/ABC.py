@@ -187,7 +187,7 @@ class ABC:
             prop1 = ancestry_props1[ancestry]
             a_dist += mean_dist(prop0, prop1)
 
-        print("Distance components:", a_dist, h_dist)
+        # print("Distance components:", a_dist, h_dist)
 
         return a_dist, h_dist
 
