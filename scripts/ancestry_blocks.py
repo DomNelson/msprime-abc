@@ -16,9 +16,9 @@ def get_bin_edges(length, nbins):
 
 
 @attr.s
-class TreeAncestry:
+class TractLengths:
     TreeSequence = attr.ib()
-    CLI_args = attr.ib()
+    t_admix = attr.ib()
 
 
     def __attrs_post_init__(self):
@@ -34,10 +34,10 @@ class TreeAncestry:
         stack = [SparseTree.get_root()]
         while len(stack) > 0:
             v = stack.pop()
-            ##TODO: Are all leaves time == 0?
-            if self.nodes[v].time == self.CLI_args.t_admix + 3:
+            ##TODO: Are all leaves time == 0? +p2
+            if self.nodes[v].time == self.t_admix + 3:
                 stack.extend(reversed(SparseTree.get_children(v)))
-            elif self.nodes[v].time > self.CLI_args.t_admix:
+            elif self.nodes[v].time > self.t_admix:
                 yield v, self.nodes[v].population
 
 
@@ -92,6 +92,7 @@ class TreeAncestry:
             for ancestry, leaf_set in leaf_ancestries.items():
                 ## Find tracts which start in this tree and assign them the
                 ## length of the tree, possibly to be incremented later
+                ##TODO: More efficient to do all these steps at once? +p3
                 self.start_new_tracts(tree.length, leaf_set, ancestry)
 
                 ## Leaves which switch ancestry mark the end of a tract
@@ -101,29 +102,30 @@ class TreeAncestry:
                 self.increment_tracts(tree.length, leaf_set, ancestry)
 
 
-    def counter_to_hist(self, counter, bins=None):
-        """ Converts a Counter object to a numpy histogram """
-        ##TODO: Could do this without expanding the list of items
-        return np.histogram(list(counter.elements()), bins=bins)
+def counter_to_hist(counter, bins=None):
+    """ Converts a Counter object to a numpy histogram """
+    ##TODO: Could do this without expanding the list of items +p3
+    return np.histogram(list(counter.elements()), bins=bins)
 
 
-    def bin_ancestry_tracts(self, bins=None):
-        """ Returns a histogram of tract lengths for each ancestry"""
-        ## Default value is an empty histogram, if one ancestry has no
-        ## tracts in the leaves
-        empty_hist = lambda: np.histogram([], bins=bins)
-        empty_ancestry_prop = lambda: 0
+def bin_ancestry_tracts(tract_lengths, Na, length, bins=None):
+    """ Returns a histogram of tract lengths for each ancestry"""
+    ## Default value is an empty histogram, if one ancestry has no
+    ## tracts in the leaves
+    empty_hist = lambda: np.histogram([], bins=bins)
+    empty_ancestry_prop = lambda: 0
 
-        tract_length_hist = defaultdict(empty_hist)
-        ancestry_props = defaultdict(empty_ancestry_prop)
+    tract_length_hist = defaultdict(empty_hist)
+    ancestry_props = defaultdict(empty_ancestry_prop)
 
-        ## Convert Counter object of tract lengths to histogram
-        for ancestry, counts in self.tract_lengths.items():
-            tract_length_hist[ancestry] = self.counter_to_hist(counts, bins)
-            ancestry_length = sum(counts.elements()) / self.CLI_args.Na
-            ancestry_props[ancestry] = ancestry_length / self.CLI_args.length
+    ## Convert Counter object of tract lengths to histogram
+    for ancestry, counts in tract_lengths.items():
+        tract_length_hist[ancestry] = counter_to_hist(counts, bins)
+        ancestry_length = sum(counts.elements()) / Na
+        ancestry_props[ancestry] = ancestry_length / length
 
-        return tract_length_hist, ancestry_props
+    return tract_length_hist, ancestry_props
+
 
 # @profile
 def main(args):
@@ -154,12 +156,16 @@ def main(args):
                             recombination_rate=args.rho, length=args.length,
                             Ne=args.Na)
 
-    ta = TreeAncestry(ts, args)
-    ta.set_tract_lengths()
+    tl = TractLengths(ts, args.t_admix)
+    tl.set_tract_lengths()
 
     ## Create histogram of ancestry tract lengths
     bin_edges = get_bin_edges(args.length, args.nbins)
-    tracts, ancestry_props = ta.bin_ancestry_tracts(bins=bin_edges)
+    tracts, ancestry_props = bin_ancestry_tracts(
+            tl.tract_lengths,
+            args.Na,
+            args.length,
+            bins=bin_edges)
 
     return tracts, ancestry_props
 
