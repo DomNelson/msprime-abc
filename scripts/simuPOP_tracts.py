@@ -1,7 +1,9 @@
 import sys, os
 import numpy as np
 import attr
-from collections import defaultdict
+import copy
+from profilehooks import profile
+from collections import defaultdict, Counter
 import simuPOP as sim
 
 
@@ -22,7 +24,9 @@ def get_tracts(genotype):
     for l, b in zip(tract_lengths, breakpoints[1:]):
         tracts[genotype[b]].append(l)
 
-    return tracts
+    binned_tracts = {k: Counter(v) for k, v in tracts.items()}
+
+    return binned_tracts
 
 
 def get_inds_per_ancestry(n_inds, ancestry_props):
@@ -99,9 +103,21 @@ class PopTracts:
         return get_genotypes(pop2)
 
 
-P = PopTracts(10, 10, [0.5, 0.5])
+def get_pop_tracts(pop):
+    """ Returns binned tract lengths for the provided population """
+    genotypes = get_genotypes(pop)
+    all_tracts = copy.copy(get_tracts(genotypes[0]))
+
+    for g in genotypes[1:]:
+        for k, v in get_tracts(g).items():
+            all_tracts[k].update(v)
+
+    return all_tracts
+
+P = PopTracts(100, 100, [0.5, 0.5])
 p_2 = P.evolve_pop(10)
 g_2 = get_genotypes(p_2)
 t_2 = get_tracts(g_2[-1])
-print(g_2)
+print(g_2[-1])
 print(t_2)
+print(get_pop_tracts(p_2))
