@@ -54,6 +54,7 @@ def msprime_hap_to_simuPOP(TreeSequence):
 
 def msprime_positions(TreeSequence):
     """ Returns position of mutations in TreeSequence """
+    ##TODO Could be done in the haplotype loop above +t3
     return [site.position for site in TreeSequence.sites()]
 
 
