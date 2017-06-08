@@ -1,9 +1,7 @@
 import msprime
 import simuPOP as sim
-from collections import defaultdict
 import numpy as np
 import sys, os
-import attr
 import argparse
 
 
