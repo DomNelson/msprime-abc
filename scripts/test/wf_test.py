@@ -8,6 +8,7 @@ import msprime_wf
 
 args = argparse.Namespace(
         Na=10,
+        Ne=1000,
         t_admix=10,
         t_div=1000,
         admixed_prop=0.5,
@@ -56,3 +57,7 @@ def test_pop(source_pops):
     for ind in pop.individuals():
         assert len(ind.genotype()) == 2 * n_sites
         assert np.array_equal(np.array(pop.lociPos()), positions)
+
+        ## Make sure we don't have any new mutations
+        assert set(ind.genotype()) == set([0, 1])
+    
