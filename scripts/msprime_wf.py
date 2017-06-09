@@ -56,11 +56,11 @@ def msprime_positions(TreeSequence):
     return [site.position for site in TreeSequence.sites()]
 
 
-def wf_init(haplotypes, positions):
+def wf_init(haplotypes, positions, ploidy=2):
     """
     Initializes a simuPOP population using the provided haplotypes
     """
-    pop = sim.Population(size=[len(haplotypes)/2])
+    pop = sim.Population(size=[len(haplotypes)/2], ploidy=ploidy)
     pop.addChrom(positions, chromName='0')
     
     ## Set genotypes for each individual separately
@@ -81,12 +81,11 @@ def evolve_pop(pop, ngens, rho, rep=1, mutation_matrix=None):
 
     ## Evolve as randomly mating population without new mutations
     simu.evolve(
-        initOps=sim.InitSex(),
-        preOps=sim.MatrixMutator(rate=mutation_matrix),
-        matingScheme=sim.RandomMating(
-                ops=sim.Recombinator(intensity=rho)),
-        gen=ngens
-    )
+            initOps=sim.InitSex(),
+            preOps=sim.MatrixMutator(rate=mutation_matrix),
+            matingScheme=sim.RandomMating(
+                    ops=sim.Recombinator(intensity=rho)),
+            gen=ngens)
 
     ##TODO This only returns one replicate even if more were specified +t1
     newpop = simu.extract(0)
@@ -110,19 +109,19 @@ def main(args):
 
     ## Output genotypes
     genotypes = [ind.genotype() for ind in pop.individuals()]
-    print(genotypes)
+    print(genotypes[-1])
 
 
 if __name__ == "__main__":
     args = argparse.Namespace(
             Na=10,
             Ne=1000,
-            t_admix=10,
+            t_admix=5,
             t_div=1000,
             admixed_prop=0.5,
             rho=1e-8,
             mu=1e-8,
-            length=1e6
+            length=3e8
             )
 
     main(args)
