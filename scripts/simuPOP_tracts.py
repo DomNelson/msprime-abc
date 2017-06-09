@@ -2,6 +2,7 @@ import sys, os
 import numpy as np
 import attr
 import copy
+import argparse
 from profilehooks import profile
 from collections import defaultdict, Counter
 import simuPOP as sim
@@ -13,6 +14,14 @@ def tract_lengths(genotype):
     genotype = np.array(genotype)
     breakpoints = np.where(np.diff(genotype) != 0)[0]
     tracts = defaultdict(list)
+    binned_tracts = defaultdict(Counter)
+
+    ## If there are no breakpoints, return a single tract
+    if len(breakpoints) == 0:
+        ancestry = genotype[0]
+        binned_tracts[ancestry] = Counter([len(genotype)])
+
+        return binned_tracts
 
     ## Get the length of the first and last tracts
     tracts[genotype[0]].append(breakpoints[0] + 1)
@@ -20,11 +29,12 @@ def tract_lengths(genotype):
 
     ## Tract lengths are the difference between successive breakpoints
     tract_lengths = np.ediff1d(breakpoints)
-
     for l, b in zip(tract_lengths, breakpoints[1:]):
         tracts[genotype[b]].append(l)
 
-    binned_tracts = {k: Counter(v) for k, v in tracts.items()}
+    ## Bin tracts by length for each ancestry
+    for k, v in tracts.items():
+        binned_tracts[k] = Counter(v)
 
     return binned_tracts
 
@@ -102,10 +112,23 @@ def pop_tracts(pop):
 
     return all_tracts
 
-p = initialize_pop(1000, 50, [0.3, 0.2, 0.4, 0.1])
-p_2 = evolve_pop(p, 10)
-g_2 = pop_genotypes(p_2)
-t_2 = tract_lengths(g_2[-1])
-print(g_2[-1])
-print(t_2)
-print(pop_tracts(p_2))
+
+def main(args):
+    p = initialize_pop(args.N, args.n_sites, args.props)
+    p_2 = evolve_pop(p, args.n_gens)
+    g_2 = pop_genotypes(p_2)
+    t_2 = tract_lengths(g_2[-1])
+    print(g_2[-1])
+    print(t_2)
+    print(pop_tracts(p_2))
+
+
+if __name__ == "__main__":
+    args = argparse.Namespace(
+            N=10,
+            n_gens=10,
+            n_sites=5,
+            props=[0.3, 0.2, 0.4, 0.1],
+            )
+
+    main(args)
