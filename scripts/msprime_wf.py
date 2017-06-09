@@ -35,7 +35,7 @@ def generate_source_pops(args):
             recombination_rate=args.rho,
             length=args.length,
             mutation_rate=args.mu,
-            Ne=args.Na)
+            Ne=args.Ne)
 
     return ts
 
@@ -71,6 +71,29 @@ def wf_init(haplotypes, positions):
     return pop
 
 
+def evolve_pop(pop, ngens, rho, rep=1, mutation_matrix=None):
+    ## Initialize simulator, without modifying original population
+    simu = sim.Simulator(pop, stealPops=False, rep=rep)
+
+    if mutation_matrix is None:
+        ##TODO Confirm only ref/alt in msprime mutation model (inf sites) +t2
+        mutation_matrix = np.identity(2).tolist()
+
+    ## Evolve as randomly mating population without new mutations
+    simu.evolve(
+        initOps=sim.InitSex(),
+        preOps=sim.MatrixMutator(rate=mutation_matrix),
+        matingScheme=sim.RandomMating(
+                ops=sim.Recombinator(intensity=rho)),
+        gen=ngens
+    )
+
+    ##TODO This only returns one replicate even if more were specified +t1
+    newpop = simu.extract(0)
+
+    return newpop
+
+
 def main(args):
     ## Generate tree sequence
     ts = generate_source_pops(args)
@@ -83,7 +106,7 @@ def main(args):
     pop = wf_init(haplotypes, positions)
 
     ## Evolve forward in time
-    pop.evolve(gen=args.t_admix)
+    pop = evolve_pop(pop, ngens=args.t_admix, rho=args.rho)
 
     ## Output genotypes
     genotypes = [ind.genotype() for ind in pop.individuals()]
@@ -93,6 +116,7 @@ def main(args):
 if __name__ == "__main__":
     args = argparse.Namespace(
             Na=10,
+            Ne=1000,
             t_admix=10,
             t_div=1000,
             admixed_prop=0.5,
