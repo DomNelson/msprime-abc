@@ -95,13 +95,13 @@ def evolve_pop(pop, ngens, rho, rep=1, mutation_matrix=None):
     return newpop
 
 
-@timecall
 def evolve_lineage(N, L, n_gens, n_loci=1000, rho=1e-8):
     """
     Traces the lineage of a given number of evenly-spaced loci along a single
     chromosome, in a randomly mating population of size N
     """
-    ## Initialize population
+    ## Initialize population, making sure that ind IDs start at 1
+    sim.IdTagger().reset(1)
     pop = sim.Population(
             N,
             loci=[n_loci],
@@ -190,26 +190,49 @@ def split_chroms(lineages):
     return lineages
 
 
+def find_coalescence(allele_lineage, ancs, gen):
+    """ Finds coalescences among active lineages 'ancs' """
+    coals = []
+    for anc in ancs:
+        inherits = np.where(allele_lineage == anc)
+
+        ## More than one inheritance of an allele means a coalescence
+        if len(inherits[0]) > 1:
+            coals.append((inherits[0], anc, gen))
+
+    return coals
+
+
 def trace_allele_lineage(allele_lineage):
     """ Reconstructs coalescent tree from wf simulations """
     ## Recursively trace alleles back through the generations
     current_gen = allele_lineage[-1]
+    ancs = set(current_gen)
 
+    coals = [find_coalescence(current_gen, ancs, len(allele_lineage)-1)]
     for gen in range(len(allele_lineage)-1, 0, -1):
         current_gen = allele_lineage[gen-1][current_gen]
 
-    return current_gen
+        ## Tract coalescence events
+        ##TODO Think about how to vectorize +t3
+        ancs = set(allele_lineage[gen-1]).intersection(ancs)
+        coals.append(find_coalescence(allele_lineage[gen-1], ancs, gen-1))
+
+    return current_gen, coals
 
 
 def trace_lineage(lineage):
     n_gens = lineage.shape[0]
 
     all_trace = []
+    all_coals = []
     for i in range(lineage.shape[2]):
-        all_trace.append(trace_allele_lineage(lineage[:, :, i]))
+        allele_lineage, coals = trace_allele_lineage(lineage[:, :, i])
+        all_trace.append(allele_lineage)
+        all_coals.append(coals)
 
     
-    return np.asarray(all_trace).T
+    return np.asarray(all_trace).T, all_coals
 
 
 def main(args):
@@ -237,8 +260,9 @@ def main(args):
         print(parent_indices)
         print(parent_indices.shape)
 
-        allele_origins = trace_lineage(parent_indices)
+        allele_origins, coals = trace_lineage(parent_indices)
         print(allele_origins)
+        print(coals)
 
     ## Output genotypes
     # genotypes = [ind.genotype() for ind in pop.individuals()]
