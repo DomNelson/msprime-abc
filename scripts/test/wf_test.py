@@ -48,6 +48,8 @@ def test_pop(source_pops):
     for pos in positions:
         assert int(pos) != pos
 
+    ##TODO Sanity check for recombination rate +t1
+
     ## Make sure haplotypes and positions align
     n_sites = len(positions)
     for hap in haplotypes:
