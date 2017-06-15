@@ -189,9 +189,19 @@ def split_chroms(lineages):
 
     return lineages
 
+def index_to_ID(idx, gen):
+    """
+    Converts the index of an array storing inheritance at the specified
+    generation, with a row for each chromosome copy, into the signed
+    ID of the same individual
+    """
+    ##TODO Complete +t1
+    pass
+
 
 def find_coalescence(allele_lineage, ancs, gen):
     """ Finds coalescences among active lineages 'ancs' """
+    n_inds = len(allele_lineage) / 2
     coals = []
     for anc in ancs:
         inherits = np.where(allele_lineage == anc)
@@ -249,24 +259,25 @@ def main(args):
         pop = wf_init(haplotypes, positions)
         pop = evolve_pop(pop, ngens=args.t_admix, rho=args.rho)
 
+        ## Output genotypes
+        # genotypes = [ind.genotype() for ind in pop.individuals()]
+        # print(genotypes[-1])
+
     else:
         ## Trace lineages of discrete sections of the chromosome
         lineage = evolve_lineage(args.Na, args.length, args.t_admix, args.n_loci)
         lineage = parse_lineage(lineage)
+
+        ## Convert unique IDs to indices from the previous generation
         parent_indices = parent_idx(lineage, args.t_admix)
-        print(parent_indices.shape)
 
+        ## Split chromosome copies into separate rows
         parent_indices = split_chroms(parent_indices)
-        print(parent_indices)
-        print(parent_indices.shape)
 
+        ## Trace ancestral allele origins and record coalescence events
         allele_origins, coals = trace_lineage(parent_indices)
         print(allele_origins)
-        print(coals)
-
-    ## Output genotypes
-    # genotypes = [ind.genotype() for ind in pop.individuals()]
-    # print(genotypes[-1])
+        print(coals[0])
 
 
 if __name__ == "__main__":
