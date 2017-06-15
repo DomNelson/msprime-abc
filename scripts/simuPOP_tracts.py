@@ -3,34 +3,34 @@ import numpy as np
 import attr
 import copy
 import argparse
-from profilehooks import profile
+from profilehooks import profile, timecall
 from collections import defaultdict, Counter
 import simuPOP as sim
 
 
-def tract_lengths(genotype):
+def tract_lengths(haplotype):
     """ Returns tract lengths of each ancestry """
     ##TODO Make sure to split chomosome copies +t1
-    genotype = np.array(genotype)
-    breakpoints = np.where(np.diff(genotype) != 0)[0]
+    haplotype = np.array(haplotype)
+    breakpoints = np.where(np.diff(haplotype) != 0)[0]
     tracts = defaultdict(list)
     binned_tracts = defaultdict(Counter)
 
     ## If there are no breakpoints, return a single tract
     if len(breakpoints) == 0:
-        ancestry = genotype[0]
-        binned_tracts[ancestry] = Counter([len(genotype)])
+        ancestry = haplotype[0]
+        binned_tracts[ancestry] = Counter([len(haplotype)])
 
         return binned_tracts
 
     ## Get the length of the first and last tracts
-    tracts[genotype[0]].append(breakpoints[0] + 1)
-    tracts[genotype[-1]].append(len(genotype)-breakpoints[-1] - 1)
+    tracts[haplotype[0]].append(breakpoints[0] + 1)
+    tracts[haplotype[-1]].append(len(haplotype)-breakpoints[-1] - 1)
 
     ## Tract lengths are the difference between successive breakpoints
-    tract_lengths = np.ediff1d(breakpoints)
-    for l, b in zip(tract_lengths, breakpoints[1:]):
-        tracts[genotype[b]].append(l)
+    lengths = np.ediff1d(breakpoints)
+    for l, b in zip(lengths, breakpoints[1:]):
+        tracts[haplotype[b]].append(l)
 
     ## Bin tracts by length for each ancestry
     for k, v in tracts.items():
@@ -45,8 +45,15 @@ def ancestor_counts(n_inds, ancestry_props):
     return list(inds_per_ancestry)
 
 
-def pop_genotypes(pop):
-    return [ind.genotype() for ind in pop.individuals()]
+def pop_haplotypes(pop):
+    ##TODO Chroms of same individual always adjascent? Write test +t1
+    genotypes = np.asarray(pop.genotype())
+
+    ##TODO Only works for single chromosome +t2 +n1
+    n_sites = pop.numLoci()[0]
+    haplotypes = genotypes.reshape(-1, n_sites)
+
+    return haplotypes
 
 
 def initialize_pop(n_inds, n_sites, ancestry_props):
@@ -103,31 +110,34 @@ def evolve_genotypes(pop, ngens):
 
 def pop_tracts(pop):
     """ Returns binned tract lengths for the provided population """
-    genotypes = pop_genotypes(pop)
-    all_tracts = copy.copy(tract_lengths(genotypes[0]))
+    haplotypes = pop_haplotypes(pop)
 
-    for g in genotypes[1:]:
+    ##TODO Change to pass haplotypes +t1
+    all_tracts = copy.copy(tract_lengths(haplotypes[0]))
+
+    for g in haplotypes[1:]:
         for k, v in tract_lengths(g).items():
             all_tracts[k].update(v)
 
     return all_tracts
 
 
+@timecall
 def main(args):
     p = initialize_pop(args.N, args.n_sites, args.props)
     p_2 = evolve_pop(p, args.n_gens)
-    g_2 = pop_genotypes(p_2)
-    t_2 = tract_lengths(g_2[-1])
-    print(g_2[-1])
-    print(t_2)
-    print(pop_tracts(p_2))
+    # g_2 = pop_haplotypes(p_2)
+    # t_2 = tract_lengths(g_2[-1])
+    # print(g_2[-1])
+    # print(t_2)
+    # print(pop_tracts(p_2))
 
 
 if __name__ == "__main__":
     args = argparse.Namespace(
-            N=10,
-            n_gens=10,
-            n_sites=5,
+            N=1000,
+            n_gens=100,
+            n_sites=5000,
             props=[0.3, 0.2, 0.4, 0.1],
             )
 
