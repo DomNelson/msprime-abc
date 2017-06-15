@@ -1,7 +1,11 @@
+import simuOpt
+simuOpt.setOptions(alleleType='lineage', quiet=True)
+import io
 import msprime
 import simuPOP as sim
 import numpy as np
 import sys, os
+from profilehooks import timecall
 import argparse
 
 
@@ -13,11 +17,9 @@ def generate_source_pops(args):
     population_configurations = [
             msprime.PopulationConfiguration(
                     sample_size=pop0_size,
-                    initial_size=pop0_size,
                     growth_rate=0),
             msprime.PopulationConfiguration(
                     sample_size=pop1_size,
-                    initial_size=pop1_size,
                     growth_rate=0)]
 
     ## Specify admixture event
@@ -93,6 +95,123 @@ def evolve_pop(pop, ngens, rho, rep=1, mutation_matrix=None):
     return newpop
 
 
+@timecall
+def evolve_lineage(N, L, n_gens, n_loci=1000, rho=1e-8):
+    """
+    Traces the lineage of a given number of evenly-spaced loci along a single
+    chromosome, in a randomly mating population of size N
+    """
+    ## Initialize population
+    pop = sim.Population(
+            N,
+            loci=[n_loci],
+            infoFields=['ind_id', 'chromosome_id', 'allele_id', 'describe'])
+
+    ## Create memory buffer to receive file-type output from population
+    ## at each generation
+    f = io.StringIO()
+
+    ## Convert rho into an intensity along a simulated chromosome of
+    ## length 'n_loci'
+    intensity = L * rho / n_loci
+
+    simu = sim.Simulator(pop, stealPops=True, rep=n_gens)
+    simu.evolve(
+            initOps=[
+                sim.InitSex(),
+                sim.IdTagger(),
+                sim.InitLineage(mode=sim.FROM_INFO_SIGNED)
+            ],
+            matingScheme=sim.RandomMating(
+                    ops=[sim.Recombinator(intensity=intensity),
+                         sim.IdTagger()]),
+            postOps=sim.InfoEval('ind.lineage()', exposeInd='ind', output=f),
+            gen=1
+        )
+
+    lineage = f.getvalue()
+    f.close()
+
+    return lineage
+
+
+def parse_lineage(lineage):
+    """
+    Lineage is output serially and needs to be parsed as a string. Note that
+    ind IDs are 1-indexed, and positive/negative indicates maternal/paternal
+    origin
+    """
+    ##TODO Probably more efficient strategies +t3
+    lineage = lineage.strip('[]')
+    lineage = lineage.split('][')
+
+    parsed = []
+    for l in lineage:
+        extract_ind = lambda x: int(x.strip('[ ]'))
+        parsed.append(list(map(extract_ind, l.split(','))))
+
+    return np.asarray(parsed)
+
+
+def parent_idx(lineage, n_gens):
+    """
+    Convert 1-indexed signed lineage IDs into signed 0-indexed parent IDs,
+    and assign unique IDs for each generation
+    """
+    ##TODO Currently depends on implementation detail of replicates +t1
+    n_inds = lineage.shape[0] / n_gens
+    x = np.ones((n_inds, 1))
+    shift_rows = np.vstack([x * i * n_inds for i in range(n_gens)])
+
+    ## Shift abs(ID) to abs(ID)-1
+    lineage = lineage - np.sign(lineage)
+
+    ## Make all IDs < n_inds
+    lineage = lineage - np.sign(lineage) * shift_rows
+
+    ## Split into one array per generation
+    lineage = np.array(np.split(lineage, n_gens))
+
+    return lineage.astype(int)
+
+
+def split_chroms(lineages):
+    """
+    Takes concatenated chromosomes and splits them into two rows
+    """
+    i, j, k = lineages.shape
+    lineages = lineages.reshape(i, j*2, k/2)
+
+    ## Update indices to match, remembering that sign indicates maternal
+    ## or paternal inheritance
+    pos_vals = np.sign(np.abs(lineages) + lineages)
+    lineages = np.abs(lineages) * 2 + pos_vals
+
+    return lineages
+
+
+def trace_allele_lineage(allele_lineage):
+    """ Reconstructs coalescent tree from wf simulations """
+    ## Recursively trace alleles back through the generations
+    current_gen = allele_lineage[-1]
+
+    for gen in range(len(allele_lineage)-1, 0, -1):
+        current_gen = allele_lineage[gen-1][current_gen]
+
+    return current_gen
+
+
+def trace_lineage(lineage):
+    n_gens = lineage.shape[0]
+
+    all_trace = []
+    for i in range(lineage.shape[2]):
+        all_trace.append(trace_allele_lineage(lineage[:, :, i]))
+
+    
+    return np.asarray(all_trace).T
+
+
 def main(args):
     ## Generate tree sequence
     ts = generate_source_pops(args)
@@ -102,26 +221,42 @@ def main(args):
     positions = msprime_positions(ts)
 
     ## Initialize simuPOP population
-    pop = wf_init(haplotypes, positions)
+    if not args.coarse:
+        ## Simulate msprime haplotypes explicitly
+        pop = wf_init(haplotypes, positions)
+        pop = evolve_pop(pop, ngens=args.t_admix, rho=args.rho)
 
-    ## Evolve forward in time
-    pop = evolve_pop(pop, ngens=args.t_admix, rho=args.rho)
+    else:
+        ## Trace lineages of discrete sections of the chromosome
+        lineage = evolve_lineage(args.Na, args.length, args.t_admix, args.n_loci)
+        lineage = parse_lineage(lineage)
+        parent_indices = parent_idx(lineage, args.t_admix)
+        print(parent_indices.shape)
+
+        parent_indices = split_chroms(parent_indices)
+        print(parent_indices)
+        print(parent_indices.shape)
+
+        allele_origins = trace_lineage(parent_indices)
+        print(allele_origins)
 
     ## Output genotypes
-    genotypes = [ind.genotype() for ind in pop.individuals()]
-    print(genotypes[-1])
+    # genotypes = [ind.genotype() for ind in pop.individuals()]
+    # print(genotypes[-1])
 
 
 if __name__ == "__main__":
     args = argparse.Namespace(
             Na=10,
-            Ne=1000,
-            t_admix=5,
-            t_div=1000,
+            Ne=100,
+            t_admix=3,
+            t_div=10,
             admixed_prop=0.5,
             rho=1e-8,
             mu=1e-8,
-            length=3e8
+            length=1e8,
+            coarse=True,
+            n_loci=10
             )
 
     main(args)
