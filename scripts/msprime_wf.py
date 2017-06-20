@@ -1,4 +1,5 @@
 import simuOpt
+import attr
 simuOpt.setOptions(alleleType='lineage', quiet=True)
 import io
 import msprime
@@ -152,27 +153,55 @@ def parse_lineage(lineage):
 
     return np.asarray(parsed)
 
-
-def parent_idx(lineage, n_gens):
+def zero_index(lineage):
     """
     Convert 1-indexed signed lineage IDs into signed 0-indexed parent IDs,
     and assign unique IDs for each generation
     """
-    ##TODO Currently depends on implementation detail of replicates +t1
-    n_inds = lineage.shape[0] / n_gens
-    x = np.ones((n_inds, 1))
-    shift_rows = np.vstack([x * i * n_inds for i in range(n_gens)])
-
     ## Shift abs(ID) to abs(ID)-1
     lineage = lineage - np.sign(lineage)
 
-    ## Make all IDs < n_inds
+    return lineage.astype(int)
+
+
+def generation_index(lineage):
+    """
+    Return array where values denote the index in the generation prior that
+    the individual inherited the allele from
+    """
+    ##TODO Currently depends on implementation detail of replicates +t1
+    n_gens, n_inds, n_loci = lineage.shape
+    x = np.ones((n_inds, n_loci))
+    shift_rows = np.stack([x * i * n_inds for i in range(n_gens)])
+
     lineage = lineage - np.sign(lineage) * shift_rows
 
-    ## Split into one array per generation
-    lineage = np.array(np.split(lineage, n_gens))
-
     return lineage.astype(int)
+
+
+def parent_idx(lineage):
+    """
+    Converts ind IDs in lineage into the indices of parents in the previous
+    generation
+    """
+    lineage = zero_index(lineage)
+    lineage = unsign_ID(lineage)
+    lineage = generation_index(lineage)
+
+    return lineage
+
+
+def unsign_ID(lineages):
+    """
+    Takes signed maternal/paternal chromosomal IDs and converts to unsigned,
+    by doubling number of IDs
+    """
+    ## Update indices to match, remembering that sign indicates maternal
+    ## or paternal inheritance
+    pos_vals = np.sign(np.abs(lineages) + lineages)
+    lineages = np.abs(lineages) * 2 + pos_vals
+
+    return lineages
 
 
 def split_chroms(lineages):
@@ -182,12 +211,8 @@ def split_chroms(lineages):
     i, j, k = lineages.shape
     lineages = lineages.reshape(i, j*2, k/2)
 
-    ## Update indices to match, remembering that sign indicates maternal
-    ## or paternal inheritance
-    pos_vals = np.sign(np.abs(lineages) + lineages)
-    lineages = np.abs(lineages) * 2 + pos_vals
-
     return lineages
+
 
 def index_to_ID(idx, gen):
     """
@@ -199,50 +224,85 @@ def index_to_ID(idx, gen):
     pass
 
 
-def find_coalescence(allele_lineage, ancs, gen):
-    """ Finds coalescences among active lineages 'ancs' """
-    n_inds = len(allele_lineage) / 2
-    coals = []
-    for anc in ancs:
-        inherits = np.where(allele_lineage == anc)
-
-        ## More than one inheritance of an allele means a coalescence
-        if len(inherits[0]) > 1:
-            coals.append((inherits[0], anc, gen))
-
-    return coals
+def active_alleles(masked_alleles):
+    """
+    Returns alleles which can be traced to the sampled generation, namely
+    those which have not been masked
+    """
+    return masked_alleles[~masked_alleles.mask].data
 
 
-def trace_allele_lineage(allele_lineage):
-    """ Reconstructs coalescent tree from wf simulations """
-    ## Recursively trace alleles back through the generations
-    current_gen = allele_lineage[-1]
-    ancs = set(current_gen)
+def find_coalescence(allele_vec):
+    """
+    Finds coalescent events in the current allele state
+    """
+    alleles_to_track = active_alleles(allele_vec)
 
-    coals = [find_coalescence(current_gen, ancs, len(allele_lineage)-1)]
-    for gen in range(len(allele_lineage)-1, 0, -1):
-        current_gen = allele_lineage[gen-1][current_gen]
+    for allele in set(alleles_to_track):
+        ##HACK - np.where evaluates masked values == 0 as True
+        if allele == 0:
+            inherits = np.array([i for i in range(len(allele_vec))
+                                    if allele_vec[i] == 0])
+        else:
+            inherits = np.where(allele_vec == allele)[0]
 
-        ## Tract coalescence events
-        ##TODO Think about how to vectorize +t3
-        ancs = set(allele_lineage[gen-1]).intersection(ancs)
-        coals.append(find_coalescence(allele_lineage[gen-1], ancs, gen-1))
-
-    return current_gen, coals
+        if len(inherits) > 1:
+            yield allele, inherits
 
 
-def trace_lineage(lineage):
-    n_gens = lineage.shape[0]
+def step_lineage(allele_vec, inheritance_vec):
+    """
+    Returns a new allele vector updated to account for inheritances and
+    coalescences
+    """
+    new_alleles = allele_vec[inheritance_vec]
 
-    all_trace = []
-    all_coals = []
-    for i in range(lineage.shape[2]):
-        allele_lineage, coals = trace_allele_lineage(lineage[:, :, i])
-        all_trace.append(allele_lineage)
-        all_coals.append(coals)
+    return new_alleles
 
-    
-    return np.asarray(all_trace).T, all_coals
+
+def trace_lineage(allele_history):
+    """
+    Follows alleles backwards through a forward-time inheritance simulation
+    """
+    alleles = np.ma.masked_array(np.arange(allele_history.shape[1]))
+    alleles.mask = np.zeros(alleles.shape)
+
+    for i, inheritance_vec in enumerate(allele_history[::-1]):
+        ## Follow alleles through inheritance vector, masking alleles that
+        ## have coalesced
+        alleles = step_lineage(alleles, inheritance_vec)
+
+        for allele, inherits in find_coalescence(alleles):
+            yield allele, inherits, i
+
+            ## Update mask with all except first allele coalescing
+            alleles.mask[inherits[1:]] = 1
+
+
+@attr.s
+class ForwardTrees(object):
+    lineage = attr.ib()
+
+
+    def __attrs_post_init__(self):
+        self.parent_indices = parent_idx(self.lineage)
+        self.n_gens, self.n_chroms, self.n_loci = self.lineage.shape
+
+
+    def allele_history(self, allele_num):
+        """
+        Returns the forward-time inheritance paths for each generation, for
+        the given allele
+        """
+        return np.ma.masked_array(self.parent_indices[:, :, allele_num])
+
+
+    def ancestor(self, allele_num, gen):
+        """
+        Returns the ancestors carrying the allele at the given generation
+        """
+        return self.lineage[:, :, allele_num][gen]
+
 
 
 def main(args):
@@ -268,16 +328,22 @@ def main(args):
         lineage = evolve_lineage(args.Na, args.length, args.t_admix, args.n_loci)
         lineage = parse_lineage(lineage)
 
-        ## Convert unique IDs to indices from the previous generation
-        parent_indices = parent_idx(lineage, args.t_admix)
+        ## Split lineage into discrete generations
+        lineage = np.array(np.split(lineage, args.t_admix))
 
-        ## Split chromosome copies into separate rows
-        parent_indices = split_chroms(parent_indices)
+        ## Split chromosomes into their own rows
+        lineage = split_chroms(lineage)
 
-        ## Trace ancestral allele origins and record coalescence events
-        allele_origins, coals = trace_lineage(parent_indices)
-        print(allele_origins)
-        print(coals[0])
+        ## Initialize ForwardTree class
+        FT = ForwardTrees(lineage)
+
+        allele_history = FT.allele_history(0)
+        labels = range(len(allele_history[0]))
+
+        L = trace_lineage(allele_history)
+        C = [l for l in L]
+
+        print("Done")
 
 
 if __name__ == "__main__":
