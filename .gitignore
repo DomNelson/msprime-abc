@@ -1,4 +1,7 @@
 notes.md
+tmp*
+*.kin*
+*.log
 results/
 __pycache__/
 old/
