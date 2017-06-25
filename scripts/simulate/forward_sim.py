@@ -120,6 +120,7 @@ class ForwardSim(object):
         lineage = io.StringIO()
         ID = io.StringIO()
         genotype = io.StringIO()
+        recs = io.StringIO()
 
         get_ID = 'str(int(ind.info("ind_id"))) + "\t"'
         get_lineage = 'str(ind.lineage()) + "\t"'
@@ -137,7 +138,9 @@ class ForwardSim(object):
                 sim.InitLineage(mode=sim.FROM_INFO_SIGNED)
             ],
             matingScheme=sim.RandomMating(
-                ops=[sim.Recombinator(intensity=intensity),
+                ops=[sim.Recombinator(intensity=intensity,
+                                      output=recs,
+                                      infoFields='ind_id'),
                      sim.IdTagger()]),
             postOps=[sim.InfoEval(get_ID, exposeInd='ind', output=ID),
                  sim.InfoEval(get_lineage, exposeInd='ind', output=lineage),
@@ -149,6 +152,7 @@ class ForwardSim(object):
         self.raw_lineage = list_string_to_np(lineage.getvalue(), depth=2)
         self.raw_genotype = list_string_to_np(genotype.getvalue(), depth=2)
         self.raw_ID = list_string_to_np(ID.getvalue(), depth=1)
+        self.raw_recs = recs.getvalue()
 
         lineage.close()
         genotype.close()
@@ -166,15 +170,29 @@ class ForwardSim(object):
         signed_ID = np.stack([self.raw_ID, self.raw_ID * -1]).T
         self.ID = parse_output(signed_ID, self.n_gens)
 
+        ## Recombinations stay as a list of lists
+        self.recs = sort_recombs(self.raw_recs)
 
-def parse_output(output, n_gens):
+
+    def get_idx(self, ID):
+        idx = 2 * np.abs(ID) - (np.sign(ID) - 1) / 2 - 2
+
+        ## Zero ID will give a negative number, which indicates no ind
+        idx[idx < 0] = None
+
+        return idx.astype(int)
+
+
+def parse_output(output, n_gens, split=False):
     """
     Takes a string representation of simulation output and returns a
     numpy array with individuals having one row per chromosome, and
     the first axis representing time in generations
     """
     output = split_chroms(output)
-    output = split_gens(output, n_gens)
+
+    if split is True:
+        output = split_gens(output, n_gens)
 
     return output
 
@@ -208,6 +226,14 @@ def split_gens(array, n_gens):
     """
     return np.array(np.split(array, n_gens))
 
+
+def sort_recombs(rec_str):
+    """
+    Returns a list of recombinations in the population history, in the format:
+    """
+    recs = rec_str.strip().split('\n')
+
+    return list(map(lambda x: list(map(int, x.split(' '))), recs))
 
 
 

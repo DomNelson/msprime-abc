@@ -1,137 +1,230 @@
 import numpy as np
 import attr
+from collections import defaultdict, Counter
 
 
-def zero_index(lineage):
+def region_overap(regions):
     """
-    Convert 1-indexed signed lineage IDs into signed 0-indexed parent IDs,
-    and assign unique IDs for each generation
+    Returns a dict with format {(*old_regions_ix,): new_region} where
+    each new_region has a unique coalescence pattern
     """
-    ## Shift abs(ID) to abs(ID)-1
-    lineage = lineage - np.sign(lineage)
+    points = set().union(*regions)
+    new_regions = defaultdict(list)
 
-    return lineage.astype(int)
+    for pt in points:
+        next_regions = tuple([i for i, r in enumerate(regions) if pt in r])
+        new_regions[next_regions].append(pt)
 
+    for old_regions, new_region in new_regions.items():
 
-def generation_index(lineage):
-    """
-    Return array where values denote the index in the generation prior that
-    the individual inherited the allele from
-    """
-    ##TODO Currently depends on implementation detail of replicates +t1
-    n_gens, n_inds, n_loci = lineage.shape
-    x = np.ones((n_inds, n_loci))
-    shift_rows = np.stack([x * i * n_inds for i in range(n_gens)])
+            yield old_regions, tuple(new_region)
 
-    lineage = lineage - np.sign(lineage) * shift_rows
+        
 
-    return lineage.astype(int)
-
-
-def parent_idx(lineage):
-    """
-    Converts ind IDs in lineage into the indices of parents in the previous
-    generation
-    """
-    lineage = zero_index(lineage)
-    lineage = unsign_ID(lineage)
-    lineage = generation_index(lineage)
-
-    return lineage
+@attr.s(frozen=True)
+class Haplotype(object):
+    node = attr.ib(convert=int)
+    loci = attr.ib(convert=tuple)
+    children = attr.ib(convert=tuple)
+    active = attr.ib(default=True)
 
 
-def unsign_ID(lineages):
-    """
-    Takes signed maternal/paternal chromosomal IDs and converts to unsigned,
-    by doubling number of IDs
-    """
-    ## Update indices to match, remembering that sign indicates maternal
-    ## or paternal inheritance
-    pos_vals = np.sign(np.abs(lineages) + lineages)
-    lineages = np.abs(lineages) * 2 + pos_vals
-
-    return lineages
+    # def __eq__(self, other):
+    #     return self.__dict__ == other.__dict__
+    #
+    #
+    # def __hash__(self):
+    #     return hash(self.node, self.loci, self.children, self.active)
 
 
-def active_alleles(masked_alleles):
-    """
-    Returns alleles which can be traced to the sampled generation, namely
-    those which have not been masked
-    """
-    return masked_alleles[~masked_alleles.mask].data
+    def climb(self, node):
+        """
+        Climbs to the specified node
+        """
+        return Haplotype(node, self.loci, self.children)
 
 
-def find_coalescence(allele_vec, inheritance_vec):
-    """
-    Finds coalescent events in the current allele state
-    """
-    alleles_to_track = active_alleles(inheritance_vec)
+    def split(self, locus_ix):
+        """
+        Truncates self at locus and returns a new instance with the remainder,
+        which is still associated with the original node
+        """
+        left_loci = self.loci[locus_ix:]
+        right_loci = self.loci[:locus_ix]
 
-    for allele in set(alleles_to_track):
-        inherits_ix = np.where(new_allele_vec == allele)[0]
+        left_hap = Haplotype(self.node, left_loci, self.children)
+        right_hap = Haplotype(self.node, right_loci, self.children)
 
-        if len(active_alleles(allele_vec[inherits_ix])) > 1:
-            yield allele, inherits_ix
-
-
-def step_lineage(allele_vec, inheritance_vec):
-    """
-    Returns a new allele vector updated to account for inheritances and
-    coalescences
-    """
-    new_alleles = allele_vec[inheritance_vec]
-
-    return new_alleles
+        return left_hap, right_hap
 
 
 @attr.s
-class ForwardTrees(object):
-    ID = attr.ib()
-    lineage = attr.ib()
-    genotype = attr.ib()
-    proband_labels = attr.ib()
+class Population(object):
+    """
+    A population of haplotypes, with methods for retracing coalescent trees
+    through a lineage constructed by forward simulations
+    """
+    fsim = attr.ib()
 
 
     def __attrs_post_init__(self):
-        self.parent_indices = parent_idx(self.lineage)
-        self.n_gens, self.n_chroms, self.n_loci = self.lineage.shape
+        self.ID = self.fsim.get_idx(self.fsim.ID).ravel()
+        self.lineage = self.fsim.get_idx(self.fsim.lineage)
+        self.recs = self.fsim.recs
+        self.n_chroms, self.n_loci = self.fsim.genotype.shape
+        self.n_gens = self.fsim.n_gens
+        self.n_inds = int(self.lineage.shape[0] / self.n_gens)
+
+        self.haps = self.init_haps(self.fsim)
 
 
-    def allele_history(self, allele_num):
+    def init_haps(self, fsim):
+        nodes = self.ID[-self.n_inds:]
+        loci = tuple(np.arange(self.n_loci))
+        haps = set([Haplotype(n, loci, [n]) for n in nodes])
+
+        return haps
+
+
+    def haps_by_state(self, state):
         """
-        Returns the forward-time inheritance paths for each generation, for
-        the given allele
+        Returns current active lineages in the population
         """
-        return np.ma.masked_array(self.parent_indices[:, :, allele_num])
+        active_haps = [h for h in self.haps if h.active is state]
+        print("Active")
+        for hap in active_haps:
+            print(hap in self.haps)
+
+        return active_haps
 
 
-    def ancestor(self, allele_num, gen, ix):
+    def collect_active_haps(self):
         """
-        Returns the ancestors carrying the allele at the given generation
+        Returns haplotypes collected by current node
         """
-        return self.lineage[:, :, allele_num][gen][ix]
+        nodes = defaultdict(list)
+        print("Collecting")
+        
+        for hap in self.haps_by_state(True):
+            print(hap in self.haps)
+            nodes[hap.node].append(hap)
+
+        return nodes
 
 
-    def trace_lineage(self, allele_num):
+    def detailed_lineage(self):
         """
-        Follows alleles backwards through a forward-time inheritance simulation
+        For debugging, shows ID, lineage, and recombinations side-by-side
         """
-        allele_history = self.allele_history(allele_num)
+        return np.hstack([self.ID[self.n_inds:].reshape(-1, 1),
+                          self.lineage[self.n_inds:],
+                          np.array(self.recs[self.n_inds:]).reshape(-1, 1)])
 
-        ## Initialize labels for alleles
-        alleles = np.ma.masked_array(self.proband_labels)
-        alleles.mask = np.zeros(alleles.shape)
 
-        for i, inheritance_vec in enumerate(allele_history[::-1]):
-            ## Follow alleles through inheritance vector, masking alleles that
-            ## have coalesced
-            new_alleles = step_lineage(alleles, inheritance_vec)
+    def recombine(self):
+        """
+        Climbs haplotypes to the appropriate parent node, splitting them
+        if recombination occurred
+        """
+        new_haps = []
+        old_haps = []
+        for hap in self.haps:
+            node = hap.node
+            recs = self.recs[node]
 
-            for allele, inherits_ix in find_coalescence(alleles, new_alleles):
+            ## Format is [Offspring, Parent, StartChrom, rec1, rec2, ...]
+            ## so recs[3:] is an empty list if no recombinations occurred
+            for rec in recs[3:]:
+                ## Get nodes on either side of the split, and make sure
+                ## a recombination actually occurred
+                if rec in hap.loci:
+                    new_nodes = self.lineage[node][rec: rec + 2]
+                    assert len(set(new_nodes)) == 2
 
-                yield allele, active_alleles(alleles[inherits_ix]), i
+                    ## Replace old haplotype with new split
+                    new_haps.extend(hap.split(rec+1))
 
-                ## Update mask with all except first allele coalescing
-                new_alleles.mask[inherits_ix[1:]] = 1
+        self.haps.update(new_haps)
+        for h in old_haps:
+            assert h in self.haps
+            self.haps.discard(h)
 
-            alleles = new_alleles
+
+    def climb(self):
+        """
+        Climb all haplotypes to their parent node
+        """
+        active_haps = self.haps_by_state(True)
+        for hap in active_haps:
+            parent_ix = hap.loci[0]
+            new_node = self.lineage[hap.node][parent_ix]
+            self.haps.add(hap.climb(new_node))
+            assert hap in self.haps
+            self.haps.discard(hap)
+
+
+    def coalesce(self):
+        """
+        Coalesces haplotypes that share loci within a common ancestor
+        """
+        for node, haps in self.collect_active_haps().items():
+            print("-" * 60)
+
+            if len(haps) > 1:
+                print("Coalescing", haps)
+                regions = [h.loci for h in haps]
+                new_regions = region_overap(regions)
+
+                for old_regions, new_region in new_regions:
+                    ## Modify loci associated with uncoalesced regions
+                    if len(old_regions) == 1:
+                        old_hap = haps[old_regions[0]]
+                        new_hap = Haplotype(old_hap.node, new_region,
+                                            old_hap.children)
+
+                        ## Replace haplotype with updated region
+                        self.haps.discard(old_hap)
+                        self.haps.add(new_hap)
+
+                    else:
+                    ## Create coalesced haplotypes
+                        children = []
+                        for i in old_regions:
+                            children.extend(haps[i].children)
+                        children = tuple(sorted(children))
+
+                        ## Create an inactive haplotype recording the
+                        ## coalescence
+                        coalesced_hap = Haplotype(node,
+                                                  new_region,
+                                                  children,
+                                                  active=False)
+                        self.haps.add(coalesced_hap)
+                        print("\nCoalesced hap", coalesced_hap)
+
+                        ## Create a new haplotype to continue climbing
+                        new_hap = Haplotype(node, new_region, [node])
+                        self.haps.add(new_hap)
+                        print("New hap", new_hap, "\n")
+
+                        ## Remove old haplotypes
+                        for i in old_regions:
+                            print("Removing", haps[i])
+                            print(haps[i] in self.haps)
+                            self.haps.discard(haps[i])
+                            print(haps[i] in self.haps)
+
+
+@attr.s
+class ForwardTree(object):
+    fsim = attr.ib()
+    records = attr.ib()
+    haplotypes = attr.ib()
+
+
+    def climb(self):
+        """
+        Ascends the lineages of the given haplotypes until a recombination
+        occurs
+        """
+        ancs = Counter(self.lineage)

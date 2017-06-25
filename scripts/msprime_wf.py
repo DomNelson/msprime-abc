@@ -33,15 +33,20 @@ def main(args):
                                args.n_loci)
         FSim.evolve()
 
-        ## Initialize ForwardTree class
-        import ipdb; ipdb.set_trace()
-        FT = trace.ForwardTrees(lineage)
-
-        L = FT.trace_lineage(0)
-        C = [l for l in L]
-
-        print(FT.allele_history(0))
-        print(C)
+        ## Initialize population
+        P = trace.Population(FSim)
+        P.recombine()
+        P.climb()
+        # P.coalesce()
+        # import ipdb; ipdb.set_trace()
+        from IPython import embed; embed()
+        # FT = trace.ForwardTrees(lineage)
+        #
+        # L = FT.trace_lineage(0)
+        # C = [l for l in L]
+        #
+        # print(FT.allele_history(0))
+        # print(C)
 
 
 if __name__ == "__main__":
