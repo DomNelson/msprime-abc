@@ -29,14 +29,6 @@ class Haplotype(object):
     active = attr.ib(default=True)
 
 
-    # def __eq__(self, other):
-    #     return self.__dict__ == other.__dict__
-    #
-    #
-    # def __hash__(self):
-    #     return hash(self.node, self.loci, self.children, self.active)
-
-
     def climb(self, node):
         """
         Climbs to the specified node
@@ -44,18 +36,20 @@ class Haplotype(object):
         return Haplotype(node, self.loci, self.children)
 
 
-    def split(self, locus_ix):
+    def split(self, loci_ix):
         """
-        Truncates self at locus and returns a new instance with the remainder,
-        which is still associated with the original node
+        Returns new haplotypes, representing the current haplotype split at
+        the given loci
         """
-        left_loci = self.loci[locus_ix:]
-        right_loci = self.loci[:locus_ix]
+        segments = [self.loci[:loci_ix[0]+1]]
 
-        left_hap = Haplotype(self.node, left_loci, self.children)
-        right_hap = Haplotype(self.node, right_loci, self.children)
+        for i in range(1, len(loci_ix)):
+            segments.append(self.loci[loci_ix[i-1]+1:loci_ix[i]+1])
 
-        return left_hap, right_hap
+        ## Add the last segment
+        segments.append(self.loci[loci_ix[-1]+1:])
+
+        return [Haplotype(self.node, s, self.children) for s in segments]
 
 
 @attr.s
@@ -86,16 +80,11 @@ class Population(object):
         return haps
 
 
-    def haps_by_state(self, state):
+    def active_haps(self):
         """
         Returns current active lineages in the population
         """
-        active_haps = [h for h in self.haps if h.active is state]
-        print("Active")
-        for hap in active_haps:
-            print(hap in self.haps)
-
-        return active_haps
+        return [h for h in self.haps if h.active is True]
 
 
     def collect_active_haps(self):
@@ -103,10 +92,8 @@ class Population(object):
         Returns haplotypes collected by current node
         """
         nodes = defaultdict(list)
-        print("Collecting")
         
-        for hap in self.haps_by_state(True):
-            print(hap in self.haps)
+        for hap in self.active_haps():
             nodes[hap.node].append(hap)
 
         return nodes
@@ -128,21 +115,18 @@ class Population(object):
         """
         new_haps = []
         old_haps = []
-        for hap in self.haps:
+        for hap in self.active_haps():
             node = hap.node
-            recs = self.recs[node]
-
             ## Format is [Offspring, Parent, StartChrom, rec1, rec2, ...]
-            ## so recs[3:] is an empty list if no recombinations occurred
-            for rec in recs[3:]:
-                ## Get nodes on either side of the split, and make sure
-                ## a recombination actually occurred
-                if rec in hap.loci:
-                    new_nodes = self.lineage[node][rec: rec + 2]
-                    assert len(set(new_nodes)) == 2
+            recs = self.recs[node][3:]
 
-                    ## Replace old haplotype with new split
-                    new_haps.extend(hap.split(rec+1))
+            ## Only split if both sides of breakpoint are in Haplotype
+            recs = [r for r in recs if (r in hap.loci and r+1 in hap.loci)]
+
+            ## Replace old haplotype with new split
+            if len(recs) > 0:
+                new_haps.extend(hap.split(recs))
+                old_haps.append(hap)
 
         self.haps.update(new_haps)
         for h in old_haps:
@@ -154,8 +138,7 @@ class Population(object):
         """
         Climb all haplotypes to their parent node
         """
-        active_haps = self.haps_by_state(True)
-        for hap in active_haps:
+        for hap in self.active_haps():
             parent_ix = hap.loci[0]
             new_node = self.lineage[hap.node][parent_ix]
             self.haps.add(hap.climb(new_node))
@@ -207,12 +190,12 @@ class Population(object):
                         self.haps.add(new_hap)
                         print("New hap", new_hap, "\n")
 
-                        ## Remove old haplotypes
-                        for i in old_regions:
-                            print("Removing", haps[i])
-                            print(haps[i] in self.haps)
-                            self.haps.discard(haps[i])
-                            print(haps[i] in self.haps)
+                ## Remove old haplotypes
+                for h in haps:
+                    print("Removing", h)
+                    print(h in self.haps)
+                    self.haps.discard(h)
+                    print(h in self.haps)
 
 
 @attr.s
