@@ -1,6 +1,6 @@
 import numpy as np
 import attr
-from collections import defaultdict, Counter
+from collections import defaultdict
 
 
 def region_overap(regions):
@@ -18,7 +18,6 @@ def region_overap(regions):
     for old_regions, new_region in new_regions.items():
 
             yield old_regions, tuple(new_region)
-
         
 
 @attr.s(frozen=True)
@@ -65,16 +64,21 @@ class Population(object):
         self.ID = self.fsim.get_idx(self.fsim.ID).ravel()
         self.lineage = self.fsim.get_idx(self.fsim.lineage)
         self.recs = self.fsim.recs
-        self.n_chroms, self.n_loci = self.fsim.genotype.shape
-        self.n_gens = self.fsim.n_gens
-        self.n_inds = int(self.lineage.shape[0] / self.n_gens)
 
         self.haps = self.init_haps(self.fsim)
 
 
     def init_haps(self, fsim):
-        nodes = self.ID[-self.n_inds:]
-        loci = tuple(np.arange(self.n_loci))
+        """
+        Initializes haplotypes according to ID labels, in last generation,
+        with loci numbered sequentially
+        """
+        _, n_loci = self.fsim.genotype.shape
+        n_gens = self.fsim.n_gens
+        n_inds = int(self.lineage.shape[0] / n_gens)
+
+        nodes = self.ID[-n_inds:]
+        loci = tuple(np.arange(n_loci))
         haps = set([Haplotype(n, loci, [n]) for n in nodes])
 
         return haps
@@ -113,6 +117,7 @@ class Population(object):
         Climbs haplotypes to the appropriate parent node, splitting them
         if recombination occurred
         """
+        ##TODO Check if these lists are necessary +t3
         new_haps = []
         old_haps = []
         for hap in self.active_haps():
@@ -142,7 +147,6 @@ class Population(object):
             parent_ix = hap.loci[0]
             new_node = self.lineage[hap.node][parent_ix]
             self.haps.add(hap.climb(new_node))
-            assert hap in self.haps
             self.haps.discard(hap)
 
 
@@ -151,63 +155,34 @@ class Population(object):
         Coalesces haplotypes that share loci within a common ancestor
         """
         for node, haps in self.collect_active_haps().items():
-            print("-" * 60)
 
             if len(haps) > 1:
-                print("Coalescing", haps)
                 regions = [h.loci for h in haps]
                 new_regions = region_overap(regions)
 
                 for old_regions, new_region in new_regions:
-                    ## Modify loci associated with uncoalesced regions
-                    if len(old_regions) == 1:
-                        old_hap = haps[old_regions[0]]
-                        new_hap = Haplotype(old_hap.node, new_region,
-                                            old_hap.children)
+                    ## If there is only one old_region, then no coalescence
+                    ## happened in this segment and it stays active
+                    active = (len(old_regions) == 1)
 
-                        ## Replace haplotype with updated region
-                        self.haps.discard(old_hap)
-                        self.haps.add(new_hap)
-
-                    else:
                     ## Create coalesced haplotypes
-                        children = []
-                        for i in old_regions:
-                            children.extend(haps[i].children)
-                        children = tuple(sorted(children))
+                    children = []
+                    for i in old_regions:
+                        children.extend(haps[i].children)
+                    children = tuple(sorted(children))
 
-                        ## Create an inactive haplotype recording the
-                        ## coalescence
-                        coalesced_hap = Haplotype(node,
-                                                  new_region,
-                                                  children,
-                                                  active=False)
-                        self.haps.add(coalesced_hap)
-                        print("\nCoalesced hap", coalesced_hap)
+                    ## Create an inactive haplotype recording the
+                    ## coalescence
+                    coalesced_hap = Haplotype(node, new_region, children,
+                                              active=active)
+                    self.haps.add(coalesced_hap)
 
-                        ## Create a new haplotype to continue climbing
-                        new_hap = Haplotype(node, new_region, [node])
-                        self.haps.add(new_hap)
-                        print("New hap", new_hap, "\n")
+                    ## If coalescence happened, create a new haplotype to
+                    ## continue climbing
+                    if active is False:
+                        self.haps.add(Haplotype(node, new_region, [node]))
 
                 ## Remove old haplotypes
                 for h in haps:
-                    print("Removing", h)
-                    print(h in self.haps)
                     self.haps.discard(h)
-                    print(h in self.haps)
 
-
-@attr.s
-class ForwardTree(object):
-    fsim = attr.ib()
-    records = attr.ib()
-    haplotypes = attr.ib()
-
-
-    def climb(self):
-        """
-        Ascends the lineages of the given haplotypes until a recombination
-        occurs
-        """
-        ancs = Counter(self.lineage)
