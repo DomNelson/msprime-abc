@@ -57,27 +57,25 @@ class Population(object):
     A population of haplotypes, with methods for retracing coalescent trees
     through a lineage constructed by forward simulations
     """
-    fsim = attr.ib()
+    ID = attr.ib()
+    lineage = attr.ib()
+    recs = attr.ib()
+    n_gens = attr.ib()
 
 
     def __attrs_post_init__(self):
-        self.ID = self.fsim.get_idx(self.fsim.ID).ravel()
-        self.lineage = self.fsim.get_idx(self.fsim.lineage)
-        self.recs = self.fsim.recs
-
-        self.haps = self.init_haps(self.fsim)
+        self.haps = self.init_haps()
 
 
-    def init_haps(self, fsim):
+    def init_haps(self):
         """
         Initializes haplotypes according to ID labels, in last generation,
         with loci numbered sequentially
         """
-        _, n_loci = self.fsim.genotype.shape
-        n_gens = self.fsim.n_gens
-        n_inds = int(self.lineage.shape[0] / n_gens)
+        _, n_loci = self.lineage.shape
+        self.n_inds = int(self.lineage.shape[0] / self.n_gens)
 
-        nodes = self.ID[-n_inds:]
+        nodes = self.ID[-self.n_inds:]
         loci = tuple(np.arange(n_loci))
         haps = set([Haplotype(n, loci, [n]) for n in nodes])
 
