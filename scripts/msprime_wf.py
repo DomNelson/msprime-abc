@@ -39,9 +39,10 @@ def main(args):
         lineage = FSim.get_idx(FSim.lineage)
         recs = FSim.recs
         P = trace.Population(ID, lineage, recs, args.t_admix)
-        P.recombine()
-        P.climb()
-        P.coalesce()
+        P.trace()
+        # P.recombine()
+        # P.climb()
+        # P.coalesce()
         # import ipdb; ipdb.set_trace()
         from IPython import embed; embed()
         # FT = trace.ForwardTrees(lineage)

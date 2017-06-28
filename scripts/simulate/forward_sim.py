@@ -178,7 +178,7 @@ class ForwardSim(object):
         idx = 2 * np.abs(ID) - (np.sign(ID) - 1) / 2 - 2
 
         ## Zero ID will give a negative number, which indicates no ind
-        idx[idx < 0] = None
+        idx[idx < 0] = -1
 
         return idx.astype(int)
 

@@ -28,6 +28,11 @@ class Haplotype(object):
     active = attr.ib(default=True)
 
 
+    def __attrs_post_init__(self):
+        assert self.node > 0
+        assert len(self.loci) > 0
+
+
     def climb(self, node):
         """
         Climbs to the specified node
@@ -40,6 +45,9 @@ class Haplotype(object):
         Returns new haplotypes, representing the current haplotype split at
         the given loci
         """
+        ## Shift split points to be relative to the start of the current
+        ## segment, and create first segment
+        loci_ix -= self.loci[0]
         segments = [self.loci[:loci_ix[0]+1]]
 
         for i in range(1, len(loci_ix)):
@@ -124,7 +132,8 @@ class Population(object):
             recs = self.recs[node][3:]
 
             ## Only split if both sides of breakpoint are in Haplotype
-            recs = [r for r in recs if (r in hap.loci and r+1 in hap.loci)]
+            recs = np.array([r for r in recs
+                                if (r in hap.loci and r+1 in hap.loci)])
 
             ## Replace old haplotype with new split
             if len(recs) > 0:
@@ -144,7 +153,13 @@ class Population(object):
         for hap in self.active_haps():
             parent_ix = hap.loci[0]
             new_node = self.lineage[hap.node][parent_ix]
-            self.haps.add(hap.climb(new_node))
+
+            ## Negative nodes indicate the top of the lineage
+            if new_node < 0:
+                self.haps.add(Haplotype(hap.node, hap.loci, hap.children,
+                                active=False))
+            else:
+                self.haps.add(hap.climb(new_node))
             self.haps.discard(hap)
 
 
@@ -183,4 +198,14 @@ class Population(object):
                 ## Remove old haplotypes
                 for h in haps:
                     self.haps.discard(h)
+
+
+    def trace(self):
+        """
+        Traces coalescent events through the population lineage
+        """
+        while len(self.active_haps()) > 0:
+            self.recombine()
+            self.climb()
+            self.coalesce()
 
