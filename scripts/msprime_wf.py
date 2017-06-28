@@ -4,8 +4,8 @@ from profilehooks import timecall
 import argparse
 import configparser
 
-from wf_trace import trace
-from simulate import forward_sim as fsim
+import forward_sim as fsim
+import wf_trace as trace
 
 
 def main(args):
@@ -40,34 +40,22 @@ def main(args):
         recs = FSim.recs
         P = trace.Population(ID, lineage, recs, args.t_admix)
         P.trace()
-        # P.recombine()
-        # P.climb()
-        # P.coalesce()
-        # import ipdb; ipdb.set_trace()
-        from IPython import embed; embed()
-        # FT = trace.ForwardTrees(lineage)
-        #
-        # L = FT.trace_lineage(0)
-        # C = [l for l in L]
-        #
-        # print(FT.allele_history(0))
-        # print(C)
 
 
 if __name__ == "__main__":
     # args = configparser.ConfigParser()
     # args.read('config/hybrid.conf')
     args = argparse.Namespace(
-            Na=6,
+            Na=100,
             Ne=100,
-            t_admix=3,
+            t_admix=10,
             t_div=10,
             admixed_prop=0.5,
             rho=1e-8,
             mu=1e-8,
             length=1e8,
             forward=False,
-            n_loci=3
+            n_loci=100
             )
 
     main(args)
