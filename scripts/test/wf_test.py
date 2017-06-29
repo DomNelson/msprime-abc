@@ -114,7 +114,7 @@ def check_gen(Population):
         assert len(hap.loci) >= 1
         assert len(hap.children) >= 1
         assert hap.node >= 0
-        assert set(hap.loci) == set(range(hap.loci[0], hap.loci[-1]+1))
+        assert set(np.diff(hap.loci)) == set([1])
 
 
 def test_pop(source_pops):

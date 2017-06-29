@@ -4,12 +4,17 @@ import attr
 from collections import defaultdict
 
 
+def split_consecutive(data):
+    """ Splits an array into runs of consecutive values """
+    data = np.sort(data)
+    return np.split(data, np.where(np.diff(data) != 1)[0]+1)
+
+
 def region_overap(regions):
     """
     Returns a dict with format {(*old_regions_ix,): new_region} where
     each new_region has a unique coalescence pattern
     """
-    ##TODO This will create non-contiguous regions if disjoint segments are shared +t1
     points = set().union(*regions)
     new_regions = defaultdict(list)
 
@@ -18,8 +23,10 @@ def region_overap(regions):
         new_regions[next_regions].append(pt)
 
     for old_regions, new_region in new_regions.items():
+        ## Split into contiguous regions for each set of overlapping segments
+        for contiguous_region in split_consecutive(new_region):
 
-            yield old_regions, tuple(new_region)
+            yield old_regions, tuple(contiguous_region)
 
 
 @attr.s(frozen=True)
