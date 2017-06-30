@@ -160,6 +160,7 @@ class ForwardSim(object):
 
         ## Set parsed attributes
         self.parse_sim()
+        self.pop = simu.extract(0)
 
 
     def parse_sim(self):

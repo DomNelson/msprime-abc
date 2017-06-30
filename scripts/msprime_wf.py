@@ -12,7 +12,7 @@ def main(args):
     ## Initialize simuPOP population
     if args.forward:
         ## Generate tree sequence
-        ts = generate_source_pops(args)
+        ts = fsim.generate_source_pops(args)
 
         ## Parse haplotypes
         haplotypes = fsim.msprime_hap_to_simuPOP(ts)
@@ -23,7 +23,7 @@ def main(args):
         pop = fsim.evolve_pop(pop, ngens=args.t_admix, rho=args.rho)
 
         ## Output genotypes
-        # genotypes = [ind.genotype() for ind in pop.individuals()]
+        genotypes = [ind.genotype() for ind in pop.individuals()]
         # print(genotypes[-1])
 
     else:
@@ -41,15 +41,17 @@ def main(args):
         P = trace.Population(ID, lineage, recs, args.t_admix)
         P.trace()
 
+        return P
+
 
 if __name__ == "__main__":
     # args = configparser.ConfigParser()
     # args.read('config/hybrid.conf')
     args = argparse.Namespace(
-            Na=100,
+            Na=10,
             Ne=100,
             t_admix=10,
-            t_div=10,
+            t_div=100,
             admixed_prop=0.5,
             rho=1e-8,
             mu=1e-8,
@@ -58,4 +60,4 @@ if __name__ == "__main__":
             n_loci=100
             )
 
-    main(args)
+    P = main(args)

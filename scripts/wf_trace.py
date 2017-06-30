@@ -1,4 +1,5 @@
 import numpy as np
+import msprime
 from profilehooks import timecall
 import attr
 from collections import defaultdict
@@ -81,6 +82,10 @@ class Population(object):
 
     def __attrs_post_init__(self):
         self.haps = self.init_haps()
+
+        ##NOTE Assumes constant generation size +n1
+        times = np.arange(len(self.ID)) / self.n_gens
+        self.times = np.floor(times)[::-1].astype(int)
 
 
     def init_haps(self):
@@ -202,11 +207,60 @@ class Population(object):
                     self.haps.discard(h)
 
 
-    @timecall
     def trace(self):
         """ Traces coalescent events through the population lineage """
         while len(self.active_haps()) > 0:
             self.recombine()
             self.climb()
             self.coalesce()
+
+
+    def tree_sequence(self):
+        """
+        Returns the coalescent history of the population as an msprime
+        TreeSequence object
+        """
+        nodes = msprime.NodeTable()
+        edgesets = msprime.EdgesetTable()
+
+        ## Add rows to msprime NodeTable
+        for ID, time in zip(self.ID, self.times):
+            is_sample = np.uint32(time == 0)
+            nodes.add_row(time=time, population=0, flags=is_sample)
+
+        ## Store edgesets data in structured array to simplify sorting
+        dtypes = [('left', np.uint32), ('right', np.uint32),
+                  ('parent', np.int32), ('time', np.uint32)]
+        edge_array = np.zeros(len(self.haps))
+        edge_array = np.array(edge_array, dtype=dtypes)
+
+        ## Build arrays for constructing edgesets table
+        haps = np.array(list(self.haps))
+        for i, hap in enumerate(haps):
+            edge_array[i]['left'] = hap.loci[0]
+            edge_array[i]['right'] = hap.loci[-1]
+            edge_array[i]['parent'] = hap.node
+            edge_array[i]['time'] = self.times[hap.node]
+
+        ## Ensure arrays are sorted by ascending parent time and increasing
+        ## left segment value
+        order = np.argsort(edge_array, order=['time', 'left'])
+        ordered_edgesets = edge_array[order]
+
+        children = []
+        children_length = []
+        for i in order:
+            children.extend(haps[i].children)
+            children_length.append(len(haps[i].children))
+
+        ## Construct msprime edgesets table
+        edgesets.set_columns(left=ordered_edgesets['left'],
+                 right=ordered_edgesets['right'],
+                 parent=ordered_edgesets['parent'],
+                 children=np.array(children).astype(np.int32),
+                 children_length=np.array(children_length).astype(np.uint32))
+
+        ts = msprime.load_tables(nodes=nodes, edgesets=edgesets)
+
+        return ts
 
