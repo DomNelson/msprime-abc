@@ -11,42 +11,40 @@ def split_consecutive(data):
     return np.split(data, np.where(np.diff(data) != 1)[0]+1)
 
 
-def region_overap(regions):
+def region_overlap(regions):
     """
     Returns a dict with format {(*old_regions_ix,): new_region} where
     each new_region has a unique coalescence pattern
     """
-    points = set().union(*regions)
-    new_regions = defaultdict(list)
+    points = sorted(set().union(*regions))
 
-    for pt in points:
-        next_regions = tuple([i for i, r in enumerate(regions) if pt in r])
-        new_regions[next_regions].append(pt)
+    for i in range(len(points)-1):
+        old_regions = tuple([j for j, r in enumerate(regions)
+                              if r[0] <= points[i] < r[1]])
+        new_regions = (points[i], points[i+1])
 
-    for old_regions, new_region in new_regions.items():
-        ## Split into contiguous regions for each set of overlapping segments
-        for contiguous_region in split_consecutive(new_region):
-
-            yield old_regions, tuple(contiguous_region)
+        ## No old_regions indicates disjoint regions
+        if len(old_regions) > 0:
+            yield old_regions, new_regions
 
 
 @attr.s(frozen=True)
 class Haplotype(object):
     node = attr.ib(convert=int)
-    loci = attr.ib(convert=tuple)
+    left = attr.ib(convert=int)
+    right = attr.ib(convert=int)
     children = attr.ib(convert=tuple)
     active = attr.ib(default=True)
 
 
     def __attrs_post_init__(self):
         assert self.node >= 0
-        assert len(self.loci) > 0
-        assert set(self.loci) == set(range(self.loci[0], self.loci[-1]+1))
+        assert len(self.children) > 0
 
 
     def climb(self, node):
         """ Climbs to the specified node """
-        return Haplotype(node, self.loci, self.children)
+        return Haplotype(node, self.left, self.right, self.children)
 
 
     def split(self, loci_ix):
@@ -56,16 +54,11 @@ class Haplotype(object):
         """
         ## Shift split points to be relative to the start of the current
         ## segment, and create first segment
-        loci_ix -= self.loci[0]
-        segments = [self.loci[:loci_ix[0]+1]]
+        left_pts = [self.left] + list(loci_ix)
+        right_pts = list(loci_ix) + [self.right]
 
-        for i in range(1, len(loci_ix)):
-            segments.append(self.loci[loci_ix[i-1]+1:loci_ix[i]+1])
-
-        ## Add the last segment
-        segments.append(self.loci[loci_ix[-1]+1:])
-
-        return [Haplotype(self.node, s, self.children) for s in segments]
+        for left, right in zip(left_pts, right_pts):
+            yield Haplotype(self.node, left, right, self.children)
 
 
 @attr.s
@@ -97,8 +90,9 @@ class Population(object):
         self.n_inds = int(self.lineage.shape[0] / self.n_gens)
 
         nodes = self.ID[-self.n_inds:]
-        loci = tuple(np.arange(n_loci))
-        haps = set([Haplotype(n, loci, [n]) for n in nodes])
+        left = 0
+        right = n_loci-1
+        haps = set([Haplotype(n, left, right, [n]) for n in nodes])
 
         return haps
 
@@ -141,8 +135,7 @@ class Population(object):
             recs = self.recs[node][3:]
 
             ## Only split if both sides of breakpoint are in Haplotype
-            recs = np.array([r for r in recs
-                                if (r in hap.loci and r+1 in hap.loci)])
+            recs = np.array([r for r in recs if hap.left <= r < hap.right])
 
             ## Replace old haplotype with new split
             if len(recs) > 0:
@@ -158,13 +151,13 @@ class Population(object):
     def climb(self):
         """ Climb all haplotypes to their parent node """
         for hap in self.active_haps():
-            parent_ix = hap.loci[0]
+            parent_ix = hap.left
             new_node = self.lineage[hap.node][parent_ix]
 
             ## Negative nodes indicate the top of the lineage
             if new_node < 0:
-                self.haps.add(Haplotype(hap.node, hap.loci, hap.children,
-                                active=False))
+                self.haps.add(Haplotype(hap.node, hap.left, hap.right,
+                              hap.children, active=False))
             else:
                 self.haps.add(hap.climb(new_node))
             self.haps.discard(hap)
@@ -177,8 +170,8 @@ class Population(object):
         for node, haps in self.collect_active_haps().items():
 
             if len(haps) > 1:
-                regions = [h.loci for h in haps]
-                new_regions = region_overap(regions)
+                regions = [(h.left, h.right) for h in haps]
+                new_regions = region_overlap(regions)
 
                 for old_regions, new_region in new_regions:
                     ## If there is only one old_region, then no coalescence
@@ -193,14 +186,16 @@ class Population(object):
 
                     ## Create an inactive haplotype recording the
                     ## coalescence
-                    coalesced_hap = Haplotype(node, new_region, children,
+                    left = new_region[0]
+                    right = new_region[1]
+                    coalesced_hap = Haplotype(node, left, right, children,
                                               active=active)
                     self.haps.add(coalesced_hap)
 
                     ## If coalescence happened, create a new haplotype to
                     ## continue climbing
                     if active is False:
-                        self.haps.add(Haplotype(node, new_region, [node]))
+                        self.haps.add(Haplotype(node, left, right, [node]))
 
                 ## Remove old haplotypes
                 for h in haps:
@@ -230,15 +225,15 @@ class Population(object):
 
         ## Store edgesets data in structured array to simplify sorting
         dtypes = [('left', np.uint32), ('right', np.uint32),
-                  ('parent', np.int32), ('time', np.uint32)]
+                  ('parent', np.int32), ('time', np.float)]
         edge_array = np.zeros(len(self.haps))
         edge_array = np.array(edge_array, dtype=dtypes)
 
         ## Build arrays for constructing edgesets table
         haps = np.array(list(self.haps))
         for i, hap in enumerate(haps):
-            edge_array[i]['left'] = hap.loci[0]
-            edge_array[i]['right'] = hap.loci[-1]
+            edge_array[i]['left'] = hap.left
+            edge_array[i]['right'] = hap.right
             edge_array[i]['parent'] = hap.node
             edge_array[i]['time'] = self.times[hap.node]
 

@@ -57,7 +57,7 @@ if __name__ == "__main__":
             mu=1e-8,
             length=1e8,
             forward=False,
-            n_loci=100
+            n_loci=10
             )
 
     P = main(args)

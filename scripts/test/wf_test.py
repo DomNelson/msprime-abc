@@ -21,7 +21,7 @@ args = argparse.Namespace(
         )
 
 ## Each item in the list will be passed once to the tests
-params = [args] * 30
+params = [args] * 10
 
 
 @pytest.fixture(scope='module', params=params)
@@ -111,11 +111,9 @@ def generate_pop():
 
 def check_gen(Population):
     for hap in Population.haps:
-        assert len(hap.loci) >= 1
+        assert hap.left < hap.right
         assert len(hap.children) >= 1
         assert hap.node >= 0
-        if len(hap.loci) > 1:
-            assert set(np.diff(hap.loci)) == set([1])
 
 
 def test_pop(source_pops):
