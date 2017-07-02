@@ -20,8 +20,21 @@ args = argparse.Namespace(
         n_loci=100
         )
 
+args2 = argparse.Namespace(
+        Na=30,
+        Ne=1000,
+        t_admix=30,
+        t_div=1000,
+        admixed_prop=0.5,
+        rho=1e-8,
+        mu=1e-8,
+        length=1e6,
+        forward=False,
+        n_loci=10
+        )
+
 ## Each item in the list will be passed once to the tests
-params = [args] * 10
+params = [args] * 10 + [args2] * 10
 
 
 @pytest.fixture(scope='module', params=params)
@@ -110,10 +123,19 @@ def generate_pop():
 
 
 def check_gen(Population):
+    lefts = []
+    rights = []
     for hap in Population.haps:
         assert hap.left < hap.right
         assert len(hap.children) >= 1
         assert hap.node >= 0
+        lefts.append(hap.left)
+        rights.append(hap.right)
+
+    assert len(set(lefts).difference(rights)) == 1
+    assert len(set(rights).difference(lefts)) == 1
+
+
 
 
 def test_pop(source_pops):
@@ -147,4 +169,7 @@ def test_pop(source_pops):
         ## Condition below is not strictly true, but should be in the
         ## majority of cases. Uncomment to check +n1
         # assert coal_haps <= rec_haps
+
+    ## Test conversion to msprime TreeSequence
+    ts = P.tree_sequence()
         

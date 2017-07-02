@@ -1,4 +1,5 @@
 import numpy as np
+import copy
 import msprime
 from profilehooks import timecall
 import attr
@@ -40,6 +41,7 @@ class Haplotype(object):
     def __attrs_post_init__(self):
         assert self.node >= 0
         assert len(self.children) > 0
+        assert self.left < self.right
 
 
     def climb(self, node):
@@ -54,8 +56,13 @@ class Haplotype(object):
         """
         ## Shift split points to be relative to the start of the current
         ## segment, and create first segment
-        left_pts = [self.left] + list(loci_ix)
-        right_pts = list(loci_ix) + [self.right]
+        loci_ix = np.array(loci_ix)
+        assert ((loci_ix >= self.left) & (loci_ix < self.right)).all()
+
+        ## Make sure we don't duplicate points if loci_ix contains either
+        ## self.left or self.right - 1
+        left_pts = sorted(set([self.left] + list(loci_ix + 1)))
+        right_pts = sorted(set(list(loci_ix + 1) + [self.right]))
 
         for left, right in zip(left_pts, right_pts):
             yield Haplotype(self.node, left, right, self.children)
@@ -127,6 +134,7 @@ class Population(object):
         if recombination occurred
         """
         ##TODO Check if these lists are necessary +t3
+        num_haps = len(self.haps)
         new_haps = []
         old_haps = []
         for hap in self.active_haps():
@@ -136,31 +144,43 @@ class Population(object):
 
             ## Only split if both sides of breakpoint are in Haplotype
             recs = np.array([r for r in recs if hap.left <= r < hap.right])
+            assert len(recs) == len(set(recs))
 
             ## Replace old haplotype with new split
             if len(recs) > 0:
                 new_haps.extend(hap.split(recs))
                 old_haps.append(hap)
 
-        self.haps.update(new_haps)
         for h in old_haps:
             assert h in self.haps
             self.haps.discard(h)
 
+        self.haps.update(new_haps)
+
+        ## We should have omre haplotypes after recombination
+        assert len(self.haps) >= num_haps
 
     def climb(self):
         """ Climb all haplotypes to their parent node """
         for hap in self.active_haps():
             parent_ix = hap.left
+            ##TODO: Change to use recs instead of lineage - more robust +t1
             new_node = self.lineage[hap.node][parent_ix]
+            print(hap.node, "climbs to", new_node)
 
-            ## Negative nodes indicate the top of the lineage
+            ## Negative nodes indicate the top of the lineage, which we
+            ## store as an inactive node unless the haplotype was just created
             if new_node < 0:
-                self.haps.add(Haplotype(hap.node, hap.left, hap.right,
-                              hap.children, active=False))
+                ## Newly created haplotypes start as their own child
+                if hap.node not in hap.children:
+                    self.haps.add(Haplotype(hap.node, hap.left, hap.right,
+                                  hap.children, active=False))
             else:
                 self.haps.add(hap.climb(new_node))
             self.haps.discard(hap)
+
+        if reached_top is False:
+            assert len(self.haps) == num_haps
 
 
     def coalesce(self):

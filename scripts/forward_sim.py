@@ -132,7 +132,7 @@ class ForwardSim(object):
 
         simu = sim.Simulator(pop, stealPops=True, rep=1)
         simu.evolve(
-            initOps=[
+            initOps=[sim.IdTagger(),
                 sim.InitSex(),
                 sim.InitGenotype(freq=[0.2, 0.8]),
                 sim.InitLineage(mode=sim.FROM_INFO_SIGNED)
@@ -140,12 +140,12 @@ class ForwardSim(object):
             matingScheme=sim.RandomMating(
                 ops=[sim.Recombinator(intensity=intensity,
                                       output=recs,
-                                      infoFields='ind_id'),
-                     sim.IdTagger()]),
+                                      infoFields='ind_id')]
+                     ),
             postOps=[sim.InfoEval(get_ID, exposeInd='ind', output=ID),
                  sim.InfoEval(get_lineage, exposeInd='ind', output=lineage),
                  sim.InfoEval(get_genotype, exposeInd='ind', output=genotype),
-                 sim.InitLineage(mode=sim.FROM_INFO_SIGNED)],
+                 sim.IdTagger()],
                 gen=self.n_gens
             )
 
@@ -156,6 +156,7 @@ class ForwardSim(object):
 
         lineage.close()
         genotype.close()
+        recs.close()
         ID.close()
 
         ## Set parsed attributes
