@@ -135,17 +135,21 @@ class ForwardSim(object):
             initOps=[sim.IdTagger(),
                 sim.InitSex(),
                 sim.InitGenotype(freq=[0.2, 0.8]),
-                sim.InitLineage(mode=sim.FROM_INFO_SIGNED)
+                sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
+                sim.InfoEval(get_ID, exposeInd='ind', output=ID),
+                sim.InfoEval(get_lineage, exposeInd='ind', output=lineage),
+                sim.InfoEval(get_genotype, exposeInd='ind', output=genotype)
             ],
             matingScheme=sim.RandomMating(
-                ops=[sim.Recombinator(intensity=intensity,
+                ops=[sim.IdTagger(),
+                     sim.Recombinator(intensity=intensity,
                                       output=recs,
                                       infoFields='ind_id')]
                      ),
             postOps=[sim.InfoEval(get_ID, exposeInd='ind', output=ID),
                  sim.InfoEval(get_lineage, exposeInd='ind', output=lineage),
                  sim.InfoEval(get_genotype, exposeInd='ind', output=genotype),
-                 sim.IdTagger()],
+                 ],
                 gen=self.n_gens
             )
 

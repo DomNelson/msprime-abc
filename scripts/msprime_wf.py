@@ -35,10 +35,11 @@ def main(args):
         FSim.evolve()
 
         ## Initialize population
-        ID = FSim.get_idx(FSim.ID).ravel()
-        lineage = FSim.get_idx(FSim.lineage)
+        # ID = FSim.get_idx(FSim.ID).ravel()
+        # lineage = FSim.get_idx(FSim.lineage)
+        ID = FSim.ID.ravel()
         recs = FSim.recs
-        P = trace.Population(ID, lineage, recs, args.t_admix)
+        P = trace.Population(ID, recs, args.t_admix, args.n_loci)
         P.trace()
 
         return P
@@ -50,14 +51,14 @@ if __name__ == "__main__":
     args = argparse.Namespace(
             Na=10,
             Ne=100,
-            t_admix=10,
+            t_admix=5,
             t_div=100,
             admixed_prop=0.5,
             rho=1e-8,
             mu=1e-8,
             length=1e8,
             forward=False,
-            n_loci=3
+            n_loci=30
             )
 
     P = main(args)

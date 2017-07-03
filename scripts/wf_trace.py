@@ -6,6 +6,21 @@ import attr
 from collections import defaultdict
 
 
+def get_chrom(idx, start_chrom, breakpoints):
+    """
+    Returns the chromosome in which idx falls, given the recombinations
+    provided, as either -1 or 1
+    """
+    if len(breakpoints) == 0:
+        return np.sign(start_chrom - 0.5).astype(int)
+
+    for i, b in enumerate(breakpoints):
+        if b > idx:
+            return np.sign((i + start_chrom) % 2 - 0.5).astype(int)
+
+    return np.sign((i + start_chrom - 1) % 2 - 0.5).astype(int)
+
+
 def split_consecutive(data):
     """ Splits an array into runs of consecutive values """
     data = np.sort(data)
@@ -39,7 +54,7 @@ class Haplotype(object):
 
 
     def __attrs_post_init__(self):
-        assert self.node >= 0
+        assert self.node != 0
         assert len(self.children) > 0
         assert self.left < self.right
 
@@ -75,9 +90,9 @@ class Population(object):
     through a lineage constructed by forward simulations
     """
     ID = attr.ib()
-    lineage = attr.ib()
     recs = attr.ib()
     n_gens = attr.ib()
+    n_loci = attr.ib()
 
 
     def __attrs_post_init__(self):
@@ -87,18 +102,24 @@ class Population(object):
         times = np.arange(len(self.ID)) / self.n_gens
         self.times = np.floor(times)[::-1].astype(int)
 
+        ## Make dict associating IDs with recs, ignoring the founding
+        ## generation
+        ##NOTE Assumes constant generation size +n1
+        assert len(self.ID) == len(self.recs) + self.n_inds
+        self.rec_dict = dict(zip(self.ID[self.n_inds:], self.recs))
+
 
     def init_haps(self):
         """
         Initializes haplotypes according to ID labels, in last generation,
         with loci numbered sequentially
         """
-        _, n_loci = self.lineage.shape
-        self.n_inds = int(self.lineage.shape[0] / self.n_gens)
+        self.n_inds = int(self.ID.shape[0] / (self.n_gens+1))
 
+        ##NOTE Assumes constant generation size +n1
         nodes = self.ID[-self.n_inds:]
         left = 0
-        right = n_loci-1
+        right = self.n_loci-1
         haps = set([Haplotype(n, left, right, [n]) for n in nodes])
 
         return haps
@@ -124,7 +145,6 @@ class Population(object):
         For debugging, shows ID, lineage, and recombinations side-by-side
         """
         return np.hstack([self.ID.reshape(-1, 1),
-                          self.lineage,
                           np.array(self.recs).reshape(-1, 1)])
 
 
@@ -160,27 +180,35 @@ class Population(object):
         ## We should have omre haplotypes after recombination
         assert len(self.haps) >= num_haps
 
+
     def climb(self):
         """ Climb all haplotypes to their parent node """
         for hap in self.active_haps():
-            parent_ix = hap.left
-            ##TODO: Change to use recs instead of lineage - more robust +t1
-            new_node = self.lineage[hap.node][parent_ix]
-            print(hap.node, "climbs to", new_node)
-
-            ## Negative nodes indicate the top of the lineage, which we
-            ## store as an inactive node unless the haplotype was just created
-            if new_node < 0:
-                ## Newly created haplotypes start as their own child
+            try:
+                recs = self.rec_dict[hap.node]
+            except KeyError:
+                ## Founders have no recorded recombinations, so we store
+                ## them as an inactive node unless the haplotype was just
+                ## created - newly created haplotypes start as their own child
                 if hap.node not in hap.children:
                     self.haps.add(Haplotype(hap.node, hap.left, hap.right,
                                   hap.children, active=False))
-            else:
-                self.haps.add(hap.climb(new_node))
-            self.haps.discard(hap)
 
-        if reached_top is False:
-            assert len(self.haps) == num_haps
+                self.haps.discard(hap)
+                continue
+
+            offspring, parent, start_chrom, *breakpoints = recs
+            assert offspring == np.abs(hap.node)
+
+            ## Find which parental chromosome the haplotype inherits from,
+            ## given that chrom is +-1 and chrom labels are signed
+            chrom = get_chrom(hap.left, start_chrom, breakpoints)
+            new_node = parent * chrom
+
+            ## Climb to new node and discard old haplotype
+            print(hap, "climbs to", new_node)
+            self.haps.add(hap.climb(new_node))
+            self.haps.discard(hap)
 
 
     def coalesce(self):
