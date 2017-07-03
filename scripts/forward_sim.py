@@ -117,14 +117,11 @@ class ForwardSim(object):
 
         ## Create memory buffer to receive file-type output from population
         ## at each generation
-        lineage = io.StringIO()
         ID = io.StringIO()
-        genotype = io.StringIO()
         recs = io.StringIO()
 
         get_ID = 'str(int(ind.info("ind_id"))) + "\t"'
-        get_lineage = 'str(ind.lineage()) + "\t"'
-        get_genotype = 'str(ind.genotype()) + "\t"'
+        get_genotype = """str(ind.genotype()).strip('[]') + '\t'"""
 
         ## Convert rho into an intensity along a simulated chromosome of
         ## length 'n_loci'
@@ -137,8 +134,7 @@ class ForwardSim(object):
                 sim.InitGenotype(freq=[0.2, 0.8]),
                 sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
                 sim.InfoEval(get_ID, exposeInd='ind', output=ID),
-                sim.InfoEval(get_lineage, exposeInd='ind', output=lineage),
-                sim.InfoEval(get_genotype, exposeInd='ind', output=genotype)
+                sim.InfoEval(get_genotype, exposeInd='ind', output='genotype.txt')
             ],
             matingScheme=sim.RandomMating(
                 ops=[sim.IdTagger(),
@@ -147,19 +143,14 @@ class ForwardSim(object):
                                       infoFields='ind_id')]
                      ),
             postOps=[sim.InfoEval(get_ID, exposeInd='ind', output=ID),
-                 sim.InfoEval(get_lineage, exposeInd='ind', output=lineage),
-                 sim.InfoEval(get_genotype, exposeInd='ind', output=genotype),
+                 sim.InfoEval(get_genotype, exposeInd='ind', output='>>genotype.txt'),
                  ],
                 gen=self.n_gens
             )
 
-        self.raw_lineage = list_string_to_np(lineage.getvalue(), depth=2)
-        self.raw_genotype = list_string_to_np(genotype.getvalue(), depth=2)
         self.raw_ID = list_string_to_np(ID.getvalue(), depth=1)
         self.raw_recs = recs.getvalue()
 
-        lineage.close()
-        genotype.close()
         recs.close()
         ID.close()
 
@@ -169,9 +160,6 @@ class ForwardSim(object):
 
 
     def parse_sim(self):
-        self.lineage = parse_output(self.raw_lineage, self.n_gens)
-        self.genotype = parse_output(self.raw_genotype, self.n_gens)
-
         ## Represent chromosomes as signed individual IDs
         signed_ID = np.stack([self.raw_ID, self.raw_ID * -1]).T
         self.ID = parse_output(signed_ID, self.n_gens)
