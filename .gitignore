@@ -1,4 +1,7 @@
 notes.md
+*DS_Store
+*.svg
+*.txt
 tmp*
 *.kin*
 *.log
