@@ -6,6 +6,15 @@ import attr
 from collections import defaultdict
 
 
+def get_idx(ID):
+    idx = 2 * np.abs(ID) - (np.sign(ID) - 1) / 2 - 2
+
+    ## Zero ID will give a negative number, which indicates no ind
+    assert (idx >= 0).all()
+
+    return idx.astype(int)
+
+
 def get_chrom(idx, start_chrom, breakpoints):
     """
     Returns the chromosome in which idx falls, given the recombinations
@@ -15,16 +24,10 @@ def get_chrom(idx, start_chrom, breakpoints):
         return np.sign(start_chrom - 0.5).astype(int)
 
     for i, b in enumerate(breakpoints):
-        if b > idx:
+        if b >= idx:
             return np.sign((i + start_chrom) % 2 - 0.5).astype(int)
 
     return np.sign((i + start_chrom - 1) % 2 - 0.5).astype(int)
-
-
-def split_consecutive(data):
-    """ Splits an array into runs of consecutive values """
-    data = np.sort(data)
-    return np.split(data, np.where(np.diff(data) != 1)[0]+1)
 
 
 def region_overlap(regions):
@@ -34,14 +37,87 @@ def region_overlap(regions):
     """
     points = sorted(set().union(*regions))
 
-    for i in range(len(points)-1):
-        old_regions = tuple([j for j, r in enumerate(regions)
-                              if r[0] <= points[i] < r[1]])
-        new_regions = (points[i], points[i+1])
+    for i in range(1, len(points)):
+        old_haps = [j for j, r in enumerate(regions)
+                        if points[i-1] >= r[0] and r[1] >= points[i]]
+        
+        ## Skip regions between disjoint segments
+        if len(old_haps) > 0:
+            yield old_haps, points[i-1], points[i]
 
-        ## No old_regions indicates disjoint regions
-        if len(old_regions) > 0:
-            yield old_regions, new_regions
+
+def collect_children(haps):
+    """ Returns a tuple containing all children of the provided haplotypes """
+    children = []
+    for hap in haps:
+        children.extend(hap.children)
+
+    assert len(children) == len(set(children))
+
+    return tuple(sorted(children))
+
+
+def coalesce_haps(common_anc_haps):
+    """
+    Coalesces haplotypes that share loci within a common ancestor
+    """
+    for node, haps in common_anc_haps:
+        assert np.array([(h.node == node) for h in haps]).all()
+        regions = [(h.left, h.right) for h in haps]
+
+        for old_hap_idx, left, right in region_overlap(regions):
+            ## Collect child nodes of coalesced haplotypes
+            old_haps = [haps[i] for i in old_hap_idx]
+            children = collect_children(old_haps)
+            assert len(children) > 0
+
+            ## If there is only haplotype in this region, then no
+            ## coalescence happened in this segment and it stays active
+            active = (len(old_haps) == 1)
+
+            ## Create updated haplotype
+            time = haps[0].time
+            yield Haplotype(node, left, right, children, time, active)
+
+            ## If coalescence happened, create a new haplotype to
+            ## continue climbing
+            if active is False:
+                assert len(children) > 1
+                yield Haplotype(node, left, right, [node], time, True)
+
+
+def recombine_haps(haps, rec_dict):
+    """
+    Climbs haplotypes to the appropriate parent node, splitting them
+    if recombination occurred
+    """
+    ##TODO Check if these lists are necessary +t3
+    num_haps = len(haps)
+    num_recs = 0
+    new_haps = []
+    old_haps = []
+    for hap in haps:
+        node = hap.node
+        ## Format is [Offspring, Parent, StartChrom, rec1, rec2, ...]
+        recs = rec_dict[node][3:]
+
+        ## Only split if both sides of breakpoint are in Haplotype. Note that
+        ## hap.right is not included in the haplotype, and splits are 
+        ## defined as happening after the recombination index
+        recs = np.array([r for r in recs if hap.left <= r < hap.right-1])
+        num_recs += len(recs)
+        assert len(recs) == len(set(recs))
+
+        ## Replace old haplotype with new split
+        if len(recs) > 0:
+            new_haps.extend(hap.split(recs))
+            old_haps.append(hap)
+
+    return old_haps, new_haps
+
+    ## We should have more haplotypes after recombination
+    assert len(self.haps) >= num_haps
+    # assert len(self.haps) == num_haps + num_recs
 
 
 @attr.s(frozen=True)
@@ -50,18 +126,20 @@ class Haplotype(object):
     left = attr.ib(convert=int)
     right = attr.ib(convert=int)
     children = attr.ib(convert=tuple)
+    time = attr.ib(convert=int)
     active = attr.ib(default=True)
 
 
     def __attrs_post_init__(self):
         assert self.node != 0
         assert len(self.children) > 0
-        assert self.left < self.right
+        assert self.left <= self.right
 
 
     def climb(self, node):
         """ Climbs to the specified node """
-        return Haplotype(node, self.left, self.right, self.children)
+        time = self.time + 1
+        return Haplotype(node, self.left, self.right, self.children, time)
 
 
     def split(self, loci_ix):
@@ -69,18 +147,15 @@ class Haplotype(object):
         Returns new haplotypes, representing the current haplotype split at
         the given loci
         """
-        ## Shift split points to be relative to the start of the current
-        ## segment, and create first segment
+        ## Make sure we don't duplicate points if loci_ix contains self.left
         loci_ix = np.array(loci_ix)
-        assert ((loci_ix >= self.left) & (loci_ix < self.right)).all()
+        pts = sorted(set([self.left] + list(loci_ix+1) + [self.right]))
+        assert ((loci_ix >= self.left) & (loci_ix < self.right-1)).all()
 
-        ## Make sure we don't duplicate points if loci_ix contains either
-        ## self.left or self.right - 1
-        left_pts = sorted(set([self.left] + list(loci_ix + 1)))
-        right_pts = sorted(set(list(loci_ix + 1) + [self.right]))
-
-        for left, right in zip(left_pts, right_pts):
-            yield Haplotype(self.node, left, right, self.children)
+        for i in range(len(pts)-1):
+            left = pts[i]
+            right = pts[i+1]
+            yield Haplotype(self.node, left, right, self.children, self.time)
 
 
 @attr.s
@@ -98,15 +173,12 @@ class Population(object):
     def __attrs_post_init__(self):
         self.haps = self.init_haps()
 
-        ##NOTE Assumes constant generation size +n1
-        times = np.arange(len(self.ID)) / self.n_gens
-        self.times = np.floor(times)[::-1].astype(int)
-
         ## Make dict associating IDs with recs, ignoring the founding
         ## generation
         ##NOTE Assumes constant generation size +n1
         assert len(self.ID) == len(self.recs) + self.n_inds
         self.rec_dict = dict(zip(self.ID[self.n_inds:], self.recs))
+        self.founders = set(self.ID[:self.n_inds])
 
 
     def init_haps(self):
@@ -119,8 +191,15 @@ class Population(object):
         ##NOTE Assumes constant generation size +n1
         nodes = self.ID[-self.n_inds:]
         left = 0
-        right = self.n_loci-1
-        haps = set([Haplotype(n, left, right, [n]) for n in nodes])
+        right = self.n_loci
+        time = 0
+
+        ## Initialize sample nodes, which do not climb
+        haps = set([Haplotype(n, left, right, [n], time, active=False)
+                    for n in nodes])
+
+        ## Initialize haplotypes to climb from samples
+        haps.update(set([Haplotype(n, left, right, [n], time) for n in nodes]))
 
         return haps
 
@@ -130,73 +209,30 @@ class Population(object):
         return [h for h in self.haps if h.active is True]
 
 
-    def collect_active_haps(self):
-        """ Returns haplotypes collected by current node """
+    def common_anc_haps(self):
+        """ Returns active haplotypes which share a common ancestor """
         nodes = defaultdict(list)
         
         for hap in self.active_haps():
             nodes[hap.node].append(hap)
 
-        return nodes
+        for node, haps in nodes.items():
+            if len(haps) > 1:
+                yield node, haps
 
 
     def detailed_lineage(self):
         """
         For debugging, shows ID, lineage, and recombinations side-by-side
         """
-        return np.hstack([self.ID.reshape(-1, 1),
+        return np.hstack([self.ID[self.n_inds:].reshape(-1, 1),
                           np.array(self.recs).reshape(-1, 1)])
-
-
-    def recombine(self):
-        """
-        Climbs haplotypes to the appropriate parent node, splitting them
-        if recombination occurred
-        """
-        ##TODO Check if these lists are necessary +t3
-        num_haps = len(self.haps)
-        new_haps = []
-        old_haps = []
-        for hap in self.active_haps():
-            node = hap.node
-            ## Format is [Offspring, Parent, StartChrom, rec1, rec2, ...]
-            recs = self.recs[node][3:]
-
-            ## Only split if both sides of breakpoint are in Haplotype
-            recs = np.array([r for r in recs if hap.left <= r < hap.right])
-            assert len(recs) == len(set(recs))
-
-            ## Replace old haplotype with new split
-            if len(recs) > 0:
-                new_haps.extend(hap.split(recs))
-                old_haps.append(hap)
-
-        for h in old_haps:
-            assert h in self.haps
-            self.haps.discard(h)
-
-        self.haps.update(new_haps)
-
-        ## We should have omre haplotypes after recombination
-        assert len(self.haps) >= num_haps
 
 
     def climb(self):
         """ Climb all haplotypes to their parent node """
         for hap in self.active_haps():
-            try:
-                recs = self.rec_dict[hap.node]
-            except KeyError:
-                ## Founders have no recorded recombinations, so we store
-                ## them as an inactive node unless the haplotype was just
-                ## created - newly created haplotypes start as their own child
-                if hap.node not in hap.children:
-                    self.haps.add(Haplotype(hap.node, hap.left, hap.right,
-                                  hap.children, active=False))
-
-                self.haps.discard(hap)
-                continue
-
+            recs = self.rec_dict[hap.node]
             offspring, parent, start_chrom, *breakpoints = recs
             assert offspring == np.abs(hap.node)
 
@@ -204,6 +240,13 @@ class Population(object):
             ## given that chrom is +-1 and chrom labels are signed
             chrom = get_chrom(hap.left, start_chrom, breakpoints)
             new_node = parent * chrom
+
+            if new_node in self.founders:
+                ## Store founders as an inactive node
+                self.haps.add(Haplotype(new_node, hap.left, hap.right,
+                              hap.children, hap.time, active=False))
+                self.haps.discard(hap)
+                continue
 
             ## Climb to new node and discard old haplotype
             print(hap, "climbs to", new_node)
@@ -213,49 +256,130 @@ class Population(object):
 
     def coalesce(self):
         """
-        Coalesces haplotypes that share loci within a common ancestor
+        Resolves coalescences within common ancestor events and updates
+        haplotypes 
         """
-        for node, haps in self.collect_active_haps().items():
+        ## Collect and coalesce haplotypes
+        common_anc_haps = list(self.common_anc_haps())
+        new_haps = coalesce_haps(common_anc_haps)
 
-            if len(haps) > 1:
-                regions = [(h.left, h.right) for h in haps]
-                new_regions = region_overlap(regions)
+        ## Replace old haplotypes with new coalesced ones
+        for node, haps in common_anc_haps:
+            for h in haps:
+                self.haps.discard(h)
 
-                for old_regions, new_region in new_regions:
-                    ## If there is only one old_region, then no coalescence
-                    ## happened in this segment and it stays active
-                    active = (len(old_regions) == 1)
+        self.haps.update(new_haps)
 
-                    ## Create coalesced haplotypes
-                    children = []
-                    for i in old_regions:
-                        children.extend(haps[i].children)
-                    children = tuple(sorted(children))
 
-                    ## Create an inactive haplotype recording the
-                    ## coalescence
-                    left = new_region[0]
-                    right = new_region[1]
-                    coalesced_hap = Haplotype(node, left, right, children,
-                                              active=active)
-                    self.haps.add(coalesced_hap)
+    def recombine(self):
+        """
+        Returns new haplotypes which have been created through recombination
+        """
+        haps = self.active_haps()
+        old_haps, new_haps = recombine_haps(haps, self.rec_dict)
 
-                    ## If coalescence happened, create a new haplotype to
-                    ## continue climbing
-                    if active is False:
-                        self.haps.add(Haplotype(node, left, right, [node]))
+        for h in old_haps:
+            assert h in self.haps
+            self.haps.discard(h)
 
-                ## Remove old haplotypes
-                for h in haps:
-                    self.haps.discard(h)
+        self.haps.update(new_haps)
 
 
     def trace(self):
         """ Traces coalescent events through the population lineage """
-        while len(self.active_haps()) > 0:
+        while len(self.active_haps()) > 1:
             self.recombine()
             self.climb()
             self.coalesce()
+
+
+@attr.s
+class WFTree(object):
+    haps = attr.ib(convert=list)
+    positions = attr.ib(convert=list)
+    L = attr.ib(convert=float)
+
+
+    def __attrs_post_init__(self):
+        self.nodes = msprime.NodeTable()
+        self.edgesets = msprime.EdgesetTable()
+        self.haps_idx = {}
+
+
+    def add_nodes(self):
+        """
+        Builds list of nodes from provided haplotypes, storing relationship
+        between hap ID and node list index
+        """
+        for i, hap in enumerate(self.haps):
+            is_sample = np.uint32(hap.time == 0)
+            self.nodes.add_row(time=hap.time, population=0, flags=is_sample)
+            self.haps_idx[hap.node] = i
+
+        assert self.nodes.num_rows == len(self.haps)
+
+
+    def hap_array(self):
+        """
+        Returns haplotype data in a structured array to facilitate contructing
+        msprime edgesets
+        """
+        edge_records = []
+        for hap in self.haps:
+            children = sorted([self.haps_idx[c] for c in hap.children])
+            if hap.time > 0 and len(children) > 1:
+                assert hap.active is False
+
+                edge_records.append((hap.left, hap.right,
+                                    self.haps_idx[hap.node],
+                                    hap.time, children, len(children)))
+            else:
+                print("Skipping", hap)
+
+        ## Store edgesets data in structured array to simplify sorting
+        dtypes = [('left', np.float), ('right', np.float),
+                  ('parent', np.int32), ('time', np.float),
+                  ('children', tuple), ('children_length', np.uint32)]
+
+        ## Ensure arrays are sorted by ascending parent time and increasing
+        ## left segment value
+        array = np.core.records.fromrecords(edge_records, dtype=dtypes)
+        ordered_array = np.sort(array, order=['time', 'left'])
+
+        return ordered_array
+
+
+    def add_edges(self):
+        """
+        Adds edges to msprime edgeset object from data in haplotype list
+        """
+        edge_array = self.hap_array()
+        children = [c for tup in edge_array['children'] for c in tup]
+
+        ## Construct msprime edgesets table
+        self.edgesets.set_columns(left=edge_array['left'],
+                 right=edge_array['right'],
+                 parent=edge_array['parent'],
+                 children=children,
+                 children_length=edge_array['children_length'])
+
+
+    def sorted_records(self):
+        """
+        For debugging, returns coalescence records in the order in which they
+        are stored in self.edgesets
+        """
+        children_idx = 0
+        for i in range(self.edgesets.num_rows):
+            parent = self.edgesets.parent[i]
+            left = self.edgesets.left[i]
+            right = self.edgesets.right[i]
+
+            l = self.edgesets.children_length[i]
+            children = self.edgesets.children[children_idx:children_idx+l]
+            children_idx += l
+
+            print(parent, left, right, children)
 
 
     def tree_sequence(self):
@@ -263,47 +387,14 @@ class Population(object):
         Returns the coalescent history of the population as an msprime
         TreeSequence object
         """
-        nodes = msprime.NodeTable()
-        edgesets = msprime.EdgesetTable()
+        self.add_nodes()
+        self.add_edges()
 
-        ## Add rows to msprime NodeTable
-        for ID, time in zip(self.ID, self.times):
-            is_sample = np.uint32(time == 0)
-            nodes.add_row(time=time, population=0, flags=is_sample)
-
-        ## Store edgesets data in structured array to simplify sorting
-        dtypes = [('left', np.uint32), ('right', np.uint32),
-                  ('parent', np.int32), ('time', np.float)]
-        edge_array = np.zeros(len(self.haps))
-        edge_array = np.array(edge_array, dtype=dtypes)
-
-        ## Build arrays for constructing edgesets table
-        haps = np.array(list(self.haps))
-        for i, hap in enumerate(haps):
-            edge_array[i]['left'] = hap.left
-            edge_array[i]['right'] = hap.right
-            edge_array[i]['parent'] = hap.node
-            edge_array[i]['time'] = self.times[hap.node]
-
-        ## Ensure arrays are sorted by ascending parent time and increasing
-        ## left segment value
-        order = np.argsort(edge_array, order=['time', 'left'])
-        ordered_edgesets = edge_array[order]
-
-        children = []
-        children_length = []
-        for i in order:
-            children.extend(haps[i].children)
-            children_length.append(len(haps[i].children))
-
-        ## Construct msprime edgesets table
-        edgesets.set_columns(left=ordered_edgesets['left'],
-                 right=ordered_edgesets['right'],
-                 parent=ordered_edgesets['parent'],
-                 children=np.array(children).astype(np.int32),
-                 children_length=np.array(children_length).astype(np.uint32))
-
-        ts = msprime.load_tables(nodes=nodes, edgesets=edgesets)
+        ts = msprime.load_tables(nodes=self.nodes, edgesets=self.edgesets)
+        assert ts.num_nodes == len(self.haps)
+        samples = [h for h in self.haps if h.time == 0]
+        assert len(list(ts.get_samples())) == len(samples)
 
         return ts
+
 

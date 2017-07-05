@@ -54,14 +54,12 @@ def source_pops(request):
 
     FSim.evolve()
 
-    ID = FSim.get_idx(FSim.ID).ravel()
-    lineage = FSim.get_idx(FSim.lineage)
+    ID = FSim.ID.ravel()
     recs = FSim.recs
 
     yield {'TreeSequence': ts, 'haplotypes': simuPOP_haps,
             'positions': positions, 'simuPOP_pop': pop,
-            'args': args, 'ID': ID, 'lineage': lineage,
-            'recs': recs}
+            'args': args, 'ID': ID, 'recs': recs}
 
 
 def test_simuPOP(source_pops):
@@ -93,24 +91,63 @@ def test_simuPOP(source_pops):
         assert set(ind.genotype()) == set([0, 1])
 
 
+def test_haps():
+    hap1 = wf_trace.Haplotype(node=1, left=0, right=3, children=(1,),
+                time=0, active=True)
+    hap2 = wf_trace.Haplotype(node=2, left=0, right=3, children=(1,),
+                time=0, active=True)
+
+    rec_dict = {1: [1, 10, 0], 2: [2, 20, 1, 0, 1]}
+
+    old_haps, new_haps = wf_trace.recombine_haps([hap1, hap2], rec_dict)
+    assert set(old_haps) == set([hap2])
+
+    ## Test chromosome splitting
+    assert len(new_haps) == 3
+    assert new_haps[0].left == 0
+    assert new_haps[0].right == 1
+    assert new_haps[1].left == 1
+    assert new_haps[1].right == 2
+    assert new_haps[2].left == 2
+    assert new_haps[2].right == 3
+
+    ## Test inheritance tracking
+    chroms = []
+    for hap in new_haps:
+        offspring, parent, start_chrom, *breakpoints = rec_dict[hap.node]
+        chroms.append(wf_trace.get_chrom(hap.left, start_chrom, breakpoints))
+
+    assert 0 not in np.diff(chroms)
+
+    ## Test coalescence
+    common_anc_haps = [(10, [
+            wf_trace.Haplotype(node=10, left=0, right=2, children=(1,), time=0),
+            wf_trace.Haplotype(node=10, left=0, right=1, children=(2,), time=0)
+            ])]
+
+    coalesced = list(wf_trace.coalesce_haps(common_anc_haps))
+    active = [h for h in coalesced if h.active is True]
+    inactive = [h for h in coalesced if h.active is False] 
+
+    assert len(coalesced) == 3
+    assert len(list(active)) == 2
+    assert len(list(inactive)) == 1
+
+
+
 def generate_pop():
     ID = np.arange(9)
-    lineage = np.array([[-1, -1, -1, -1, -1],
-                        [-1, -1, -1, -1, -1],
-                        [-1, -1, -1, -1, -1],
-                        [ 0,  1,  0,  1,  1],
-                        [ 1,  1,  1,  1,  2],
-                        [ 1,  1,  2,  2,  2],
-                        [ 3,  3,  4,  3,  3],
-                        [ 5,  4,  4,  4,  5],
-                        [ 5,  5,  5,  4,  4]])
+    lineage = np.array([[-1, -1, -1, -1, -1], #0
+                        [-1, -1, -1, -1, -1],#1
+                        [-1, -1, -1, -1, -1],#2
+                        [ 0,  1,  0,  1,  1],#3
+                        [ 1,  1,  1,  1,  2],#4
+                        [ 1,  1,  2,  2,  2],#5
+                        [ 3,  3,  4,  3,  3],#6
+                        [ 5,  4,  4,  4,  5],#7
+                        [ 5,  5,  5,  4,  4]])#8
 
-    ## Currently the first three columns are ignored - lineage is read from
-    ## separate array
-    recs = np.array([[0, 0, 0],
-                     [0, 0, 0],
-                     [0, 0, 0],
-                     [0, 0, 0, 0, 1],
+    recs = np.array([[0, 0, 0, 0, 1],
                      [0, 0, 0, 3],
                      [0, 0, 0, 1],
                      [0, 0, 0, 1, 2],
@@ -128,7 +165,7 @@ def check_gen(Population):
     for hap in Population.haps:
         assert hap.left < hap.right
         assert len(hap.children) >= 1
-        assert hap.node >= 0
+        assert hap.node != 0
         lefts.append(hap.left)
         rights.append(hap.right)
 
@@ -140,12 +177,12 @@ def check_gen(Population):
 
 def test_pop(source_pops):
     ID = source_pops['ID']
-    lineage = source_pops['lineage']
     recs = source_pops['recs']
     n_gens = source_pops['args'].t_admix
+    n_loci = source_pops['args'].n_loci
 
     ## Initialize population
-    P = wf_trace.Population(ID, lineage, recs, n_gens)
+    P = wf_trace.Population(ID, recs, n_gens, n_loci)
 
     for i in range(n_gens):
         check_gen(P)
@@ -171,5 +208,5 @@ def test_pop(source_pops):
         # assert coal_haps <= rec_haps
 
     ## Test conversion to msprime TreeSequence
-    ts = P.tree_sequence()
+    # ts = P.tree_sequence()
         

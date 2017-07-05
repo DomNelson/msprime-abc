@@ -42,16 +42,26 @@ def main(args):
         P = trace.Population(ID, recs, args.t_admix, args.n_loci)
         P.trace()
 
-        return P
+        positions = FSim.pop.lociPos()
+        T = trace.WFTree(P.haps, positions, args.length)
+        ts = T.tree_sequence()
+
+        trees = list(ts.trees())
+
+        for i, t in enumerate(trees[:5]):
+            t.draw('tree_' + str(i) + '.svg', width=5000, height=500,
+                    show_times=True)
+
+        return P, T, ts
 
 
 if __name__ == "__main__":
     # args = configparser.ConfigParser()
     # args.read('config/hybrid.conf')
     args = argparse.Namespace(
-            Na=10,
+            Na=20,
             Ne=100,
-            t_admix=5,
+            t_admix=50,
             t_div=100,
             admixed_prop=0.5,
             rho=1e-8,
@@ -61,4 +71,5 @@ if __name__ == "__main__":
             n_loci=30
             )
 
-    P = main(args)
+    # P = main(args)
+    P, T, ts = main(args)
