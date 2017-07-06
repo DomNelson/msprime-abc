@@ -1,4 +1,5 @@
 import simuOpt
+import tables
 simuOpt.setOptions(alleleType='lineage', quiet=True)
 import attr
 import io
@@ -182,25 +183,46 @@ class ForwardSim(object):
         return idx.astype(int)
 
 
-    def ind_haplotypes(self):
+    def write_haplotypes(self, h5file):
         """
         Returns an array of genotypes and corresponding chromosome IDs
         """
-        data = np.genfromtxt(self.output, delimiter=',', dtype=int)
+        filters = tables.Filters(complevel=5, complib='blosc')
 
-        ## Split chromosomes into separate rows
-        haplotypes = data[:, 1:].reshape(data.shape[0] * 2, data.shape[1] / 2)
+        with tables.open_file(h5file, 'w') as h5:
+            with open(self.output, 'r') as f:
+                line = next(f)
+                ind_ID, haplotypes = parse_simuPOP_genotype(line)
 
-        ## Signed labels for chroms, where first chrom has negative ind ID
-        ##TODO: Verify this is consistent with simuPOP labels +t1
-        ind_IDs = data[:, 0]
-        chrom_IDs = np.empty((ind_IDs.size * 2,), dtype=ind_IDs.dtype)
-        chrom_IDs[0::2] = ind_IDs * -1
-        chrom_IDs[1::2] = ind_IDs
+		## Create an extendable array in the h5 output file with
+		## the same shape as the haplotypes
+                h5.create_earray(h5.root, 'haps',
+                         atom=tables.IntAtom(shape=(2, haplotypes.shape[2])),
+                         shape=(0,), filters=filters)
+                h5.create_earray(h5.root, 'inds', atom=tables.IntAtom(),
+                         shape=(0,), filters=filters)
 
-        return chrom_IDs, haplotypes
+                h5.root.haps.append(haplotypes)
+                h5.root.inds.append(ind_ID)
+
+                for line in f:
+                    ind_ID, haplotypes = parse_simuPOP_genotype(line)
+                    h5.root.haps.append(haplotypes)
+                    h5.root.inds.append(ind_ID)
 
 
+def parse_simuPOP_genotype(genotype_string):
+    """
+    Returns chom_IDs and haplotypes from simuPOP string output
+    """
+    data = np.fromstring(genotype_string, sep=',')
+    ind_ID = data[0].reshape(1)
+    haplotypes = data[1:].reshape(1, 2, -1)
+
+    return ind_ID, haplotypes
+
+        
+        
 def parse_output(output, n_gens, split=False):
     """
     Takes a string representation of simulation output and returns a

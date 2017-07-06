@@ -1,4 +1,5 @@
 import numpy as np
+import tables
 import copy
 import msprime
 from profilehooks import timecall
@@ -319,6 +320,7 @@ class WFTree(object):
         self.nodes = msprime.NodeTable()
         self.edgesets = msprime.EdgesetTable()
         self.haps_idx = {}
+        self.idx_haps = {}
 
 
     def add_nodes(self):
@@ -330,6 +332,7 @@ class WFTree(object):
             is_sample = np.uint32(hap.time == 0)
             self.nodes.add_row(time=hap.time, population=0, flags=is_sample)
             self.haps_idx[hap.node] = i
+            self.idx_haps[i] = hap.node
 
         assert self.nodes.num_rows == len(self.haps)
 
@@ -404,10 +407,33 @@ class WFTree(object):
         self.add_edges()
 
         ts = msprime.load_tables(nodes=self.nodes, edgesets=self.edgesets)
+        ts.simplify()
         assert ts.num_nodes == len(self.haps)
         samples = [h for h in self.haps if h.time == 0]
         assert len(list(ts.get_samples())) == len(samples)
 
         return ts
 
+
+    def node_genotypes(self, nodes, h5file):
+        """
+        Returns the full genotype associated with the provided node
+        """
+        with tables.open_file(h5file, 'r') as f:
+            ind_IDs = f.root.inds[:]
+            ID_idx = dict([(ID, i) for i, ID in enumerate(ind_IDs)])
+
+            idx_node = [self.idx_haps[node] for node in nodes]
+
+            genotypes = []
+            for i, ID in enumerate(idx_node):
+                idx = ID_idx[np.abs(ID)]
+                chrom = (np.sign(ID) + 1) / 2
+                genotypes.append(f.root.haps[idx][chrom])
+
+        return genotypes
+
+
+
+            
 

@@ -33,35 +33,33 @@ def main(args):
                                args.t_admix,
                                args.n_loci)
         FSim.evolve()
+        FSim.write_haplotypes('gen.h5')
 
         ## Initialize population and trace haplotype lineages
         ID = FSim.ID.ravel()
         recs = FSim.recs
         P = trace.Population(ID, recs, args.t_admix, args.n_loci)
         P.trace()
-        print([h for h in P.haps if h.node == 0 and h.active is False])
 
         ## Convert traces haplotypes into an msprime TreeSequence
         positions = FSim.pop.lociPos()
         T = trace.WFTree(P.haps, positions)
         ts = T.tree_sequence()
+        ts.dump('treesequence.h5')
+
+        ## Get node genotypes
+        T.node_genotypes([20], 'gen.h5')
 
         ## Collect sparse trees and plot a selection
-        trees = list(ts.trees())
-        for i, t in enumerate(trees[:5]):
-            t.draw('tree_' + str(i) + '.svg', width=5000, height=500,
-                    show_times=True)
-
-
-        for ID, hap in zip(*FSim.ind_haplotypes()):
-            print(ID, hap)
+        # trees = list(ts.trees())
+        # for i, t in enumerate(trees[:5]):
+        #     t.draw('tree_' + str(i) + '.svg', width=5000, height=500,
+        #             show_times=True)
 
         return P, T, ts
 
 
 if __name__ == "__main__":
-    # args = configparser.ConfigParser()
-    # args.read('config/hybrid.conf')
     args = argparse.Namespace(
             Na=10,
             Ne=100,
