@@ -134,31 +134,6 @@ def test_haps():
     assert len(list(inactive)) == 1
 
 
-
-def generate_pop():
-    ID = np.arange(9)
-    lineage = np.array([[-1, -1, -1, -1, -1], #0
-                        [-1, -1, -1, -1, -1],#1
-                        [-1, -1, -1, -1, -1],#2
-                        [ 0,  1,  0,  1,  1],#3
-                        [ 1,  1,  1,  1,  2],#4
-                        [ 1,  1,  2,  2,  2],#5
-                        [ 3,  3,  4,  3,  3],#6
-                        [ 5,  4,  4,  4,  5],#7
-                        [ 5,  5,  5,  4,  4]])#8
-
-    recs = np.array([[0, 0, 0, 0, 1],
-                     [0, 0, 0, 3],
-                     [0, 0, 0, 1],
-                     [0, 0, 0, 1, 2],
-                     [0, 0, 0, 0, 3],
-                     [0, 0, 0, 2]])
-    n_gens = 3
-
-    P = wf_trace.Population(ID, lineage, recs, n_gens)
-    return P
-
-
 def check_gen(Population):
     lefts = []
     rights = []
@@ -171,8 +146,6 @@ def check_gen(Population):
 
     assert len(set(lefts).difference(rights)) == 1
     assert len(set(rights).difference(lefts)) == 1
-
-
 
 
 def test_pop(source_pops):
@@ -207,6 +180,26 @@ def test_pop(source_pops):
         ## majority of cases. Uncomment to check +n1
         # assert coal_haps <= rec_haps
 
+
+def test_treesequence(source_pops):
+    ID = source_pops['ID']
+    recs = source_pops['recs']
+    n_gens = source_pops['args'].t_admix
+    n_loci = source_pops['args'].n_loci
+    pop = source_pops['simuPOP_pop']
+    args = source_pops['args']
     ## Test conversion to msprime TreeSequence
-    # ts = P.tree_sequence()
+
+    P = wf_trace.Population(ID, recs, n_gens, n_loci)
+    P.trace()
+
+    positions = pop.lociPos()
+    T = wf_trace.WFTree(P.haps, positions)
+    ts = T.tree_sequence()
+
+    trees = list(ts.trees())
+
+    for t in trees:
+        assert t.num_leaves(t.root) == args.Na * 2
+
         
