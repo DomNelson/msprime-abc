@@ -101,6 +101,7 @@ class ForwardSim(object):
     n_gens = attr.ib()
     n_loci = attr.ib(default=1000)
     rho = attr.ib(default=1e-8)
+    output = attr.ib(default='genotypes.txt')
 
 
     def evolve(self):
@@ -121,7 +122,10 @@ class ForwardSim(object):
         recs = io.StringIO()
 
         get_ID = 'str(int(ind.info("ind_id"))) + "\t"'
-        get_genotype = """str(ind.genotype()).strip('[]') + '\t'"""
+        get_genotype = "str(int(ind.info('ind_id'))) + ','" +\
+                        "+ str(ind.genotype()).strip('[]') + '\\n'"
+        get_genotype_init = "str(-1 * int(ind.info('ind_id'))) + ','" +\
+                        "+ str(ind.genotype()).strip('[]') + '\\n'"
 
         ## Convert rho into an intensity along a simulated chromosome of
         ## length 'n_loci'
@@ -134,7 +138,7 @@ class ForwardSim(object):
                 sim.InitGenotype(freq=[0.2, 0.8]),
                 sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
                 sim.InfoEval(get_ID, exposeInd='ind', output=ID),
-                sim.InfoEval(get_genotype, exposeInd='ind', output='genotype.txt')
+                sim.InfoEval(get_genotype_init, exposeInd='ind', output=self.output)
             ],
             matingScheme=sim.RandomMating(
                 ops=[sim.IdTagger(),
@@ -143,7 +147,8 @@ class ForwardSim(object):
                                       infoFields='ind_id')]
                      ),
             postOps=[sim.InfoEval(get_ID, exposeInd='ind', output=ID),
-                 sim.InfoEval(get_genotype, exposeInd='ind', output='>>genotype.txt'),
+                 sim.InfoEval(get_genotype, exposeInd='ind',
+                              output='>>' + self.output),
                  ],
                 gen=self.n_gens
             )
@@ -175,6 +180,25 @@ class ForwardSim(object):
         idx[idx < 0] = -1
 
         return idx.astype(int)
+
+
+    def ind_haplotypes(self):
+        """
+        Returns an array of genotypes and corresponding chromosome IDs
+        """
+        data = np.genfromtxt(self.output, delimiter=',', dtype=int)
+
+        ## Split chromosomes into separate rows
+        haplotypes = data[:, 1:].reshape(data.shape[0] * 2, data.shape[1] / 2)
+
+        ## Signed labels for chroms, where first chrom has negative ind ID
+        ##TODO: Verify this is consistent with simuPOP labels +t1
+        ind_IDs = data[:, 0]
+        chrom_IDs = np.empty((ind_IDs.size * 2,), dtype=ind_IDs.dtype)
+        chrom_IDs[0::2] = ind_IDs * -1
+        chrom_IDs[1::2] = ind_IDs
+
+        return chrom_IDs, haplotypes
 
 
 def parse_output(output, n_gens, split=False):

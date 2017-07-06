@@ -34,27 +34,27 @@ def main(args):
                                args.n_loci)
         FSim.evolve()
 
-        ## Initialize population
-        # ID = FSim.get_idx(FSim.ID).ravel()
-        # lineage = FSim.get_idx(FSim.lineage)
+        ## Initialize population and trace haplotype lineages
         ID = FSim.ID.ravel()
         recs = FSim.recs
         P = trace.Population(ID, recs, args.t_admix, args.n_loci)
         P.trace()
-        print([h for h in P.haps if h.node == 0])
+        print([h for h in P.haps if h.node == 0 and h.active is False])
 
+        ## Convert traces haplotypes into an msprime TreeSequence
         positions = FSim.pop.lociPos()
         T = trace.WFTree(P.haps, positions)
         ts = T.tree_sequence()
 
+        ## Collect sparse trees and plot a selection
         trees = list(ts.trees())
-
         for i, t in enumerate(trees[:5]):
             t.draw('tree_' + str(i) + '.svg', width=5000, height=500,
                     show_times=True)
 
-        for t in trees:
-            assert t.num_leaves(t.root) == args.Na * 2
+
+        for ID, hap in zip(*FSim.ind_haplotypes()):
+            print(ID, hap)
 
         return P, T, ts
 
@@ -65,14 +65,14 @@ if __name__ == "__main__":
     args = argparse.Namespace(
             Na=10,
             Ne=100,
-            t_admix=50,
+            t_admix=10,
             t_div=100,
             admixed_prop=0.5,
             rho=1e-8,
             mu=1e-8,
             length=1e8,
             forward=False,
-            n_loci=300
+            n_loci=10
             )
 
     # P = main(args)
