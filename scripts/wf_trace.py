@@ -131,7 +131,7 @@ class Haplotype(object):
 
 
     def __attrs_post_init__(self):
-        assert self.node != 0
+        # assert self.node != 0 # - used as label for great anc of whole pop
         assert len(self.children) > 0
         assert self.left <= self.right
 
@@ -168,6 +168,7 @@ class Population(object):
     recs = attr.ib()
     n_gens = attr.ib()
     n_loci = attr.ib()
+    coalesce_all = attr.ib(default=True)
 
 
     def __attrs_post_init__(self):
@@ -179,6 +180,7 @@ class Population(object):
         assert len(self.ID) == len(self.recs) + self.n_inds
         self.rec_dict = dict(zip(self.ID[self.n_inds:], self.recs))
         self.founders = set(self.ID[:self.n_inds])
+        self.uncoalesced_haps = []
 
 
     def init_haps(self):
@@ -245,11 +247,12 @@ class Population(object):
                 ## Store founders as an inactive node
                 self.haps.add(Haplotype(new_node, hap.left, hap.right,
                               hap.children, hap.time, active=False))
+                self.uncoalesced_haps.append(hap)
                 self.haps.discard(hap)
                 continue
 
             ## Climb to new node and discard old haplotype
-            print(hap, "climbs to", new_node)
+            # print(hap, "climbs to", new_node)
             self.haps.add(hap.climb(new_node))
             self.haps.discard(hap)
 
@@ -287,9 +290,22 @@ class Population(object):
 
     def trace(self):
         """ Traces coalescent events through the population lineage """
-        while len(self.active_haps()) > 1:
+        ##NOTE: This is where we can decide to stop as soon as all lineages
+        ## have coalesced +n1
+        while len(self.active_haps()) > 0:
+            print(len(self.active_haps()))
             self.recombine()
             self.climb()
+            self.coalesce()
+
+        if self.coalesce_all is True:
+            print("Coalescing all remaning haps")
+            ## If set, coalesce all remaining haplotypes in a new node
+            great_anc_node = 0
+            for hap in self.uncoalesced_haps:
+                self.haps.add(hap.climb(great_anc_node))
+                self.haps.discard(hap)
+
             self.coalesce()
 
 
@@ -297,7 +313,6 @@ class Population(object):
 class WFTree(object):
     haps = attr.ib(convert=list)
     positions = attr.ib(convert=list)
-    L = attr.ib(convert=float)
 
 
     def __attrs_post_init__(self):
@@ -333,8 +348,6 @@ class WFTree(object):
                 edge_records.append((hap.left, hap.right,
                                     self.haps_idx[hap.node],
                                     hap.time, children, len(children)))
-            else:
-                print("Skipping", hap)
 
         ## Store edgesets data in structured array to simplify sorting
         dtypes = [('left', np.float), ('right', np.float),
