@@ -57,6 +57,9 @@ def source_pops(request):
     ID = FSim.ID.ravel()
     recs = FSim.recs
 
+    ## Write genotypes to file
+    FSim.write_haplotypes('gen.h5')
+
     yield {'TreeSequence': ts, 'haplotypes': simuPOP_haps,
             'positions': positions, 'simuPOP_pop': pop,
             'args': args, 'ID': ID, 'recs': recs}
@@ -202,4 +205,17 @@ def test_treesequence(source_pops):
     for t in trees:
         assert t.num_leaves(t.root) == args.Na * 2
 
-        
+    ## Check node genotypes
+    for t in ts.trees():
+        left, right = list(map(int, t.interval))
+        print("interval:", left, right)
+
+        genotypes = T.node_genotypes(t.nodes(), 'gen.h5')
+
+        for r in t.children(t.root):
+            print("Root node", r)
+            g = set().union([tuple(genotypes[l][left:right])
+                                for l in t.leaves(r)])
+            assert len(g) == 1
+            print(g)
+
