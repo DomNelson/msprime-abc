@@ -2,6 +2,7 @@
 Demographic inference and more, using msprime and simuPOP
 
 # Known Issues:
+### WFTree
 * No mutations
 * Fixed population size per generation
 * Limited to single randomly-mating population
