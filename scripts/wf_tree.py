@@ -6,7 +6,7 @@ import configparser
 import attr
 
 import forward_sim as fsim
-import wf_trace as trace
+import trace_tree
 
 
 @attr.s
@@ -42,13 +42,13 @@ class WFTree(object):
         """
         Traces lineages through forward simulations
         """
-        P = trace.Population(self.ID, self.recs, self.n_gens,
+        P = trace_tree.Population(self.ID, self.recs, self.n_gens,
                              self.n_loci)
         P.trace()
 
         ## Convert traces haplotypes into an msprime TreeSequence
         self.positions = self.FSim.pop.lociPos()
-        self.T = trace.TreeBuilder(P.haps, self.positions)
+        self.T = trace_tree.TreeBuilder(P.haps, self.positions)
         self.ts = self.T.tree_sequence()
 
 

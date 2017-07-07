@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 sys.path.append(os.path.abspath('../'))
 import argparse
-import wf_trace
+import trace_tree
 import forward_sim as fsim
 
 
@@ -88,14 +88,14 @@ def source_pops(request):
 
 
 def test_haps():
-    hap1 = wf_trace.Haplotype(node=1, left=0, right=3, children=(1,),
+    hap1 = trace_tree.Haplotype(node=1, left=0, right=3, children=(1,),
                 time=0, active=True)
-    hap2 = wf_trace.Haplotype(node=2, left=0, right=3, children=(1,),
+    hap2 = trace_tree.Haplotype(node=2, left=0, right=3, children=(1,),
                 time=0, active=True)
 
     rec_dict = {1: [1, 10, 0], 2: [2, 20, 1, 0, 1]}
 
-    old_haps, new_haps = wf_trace.recombine_haps([hap1, hap2], rec_dict)
+    old_haps, new_haps = trace_tree.recombine_haps([hap1, hap2], rec_dict)
     assert set(old_haps) == set([hap2])
 
     ## Test chromosome splitting
@@ -111,17 +111,17 @@ def test_haps():
     chroms = []
     for hap in new_haps:
         offspring, parent, start_chrom, *breakpoints = rec_dict[hap.node]
-        chroms.append(wf_trace.get_chrom(hap.left, start_chrom, breakpoints))
+        chroms.append(trace_tree.get_chrom(hap.left, start_chrom, breakpoints))
 
     assert 0 not in np.diff(chroms)
 
     ## Test coalescence
     common_anc_haps = [(10, [
-            wf_trace.Haplotype(node=10, left=0, right=2, children=(1,), time=0),
-            wf_trace.Haplotype(node=10, left=0, right=1, children=(2,), time=0)
+            trace_tree.Haplotype(node=10, left=0, right=2, children=(1,), time=0),
+            trace_tree.Haplotype(node=10, left=0, right=1, children=(2,), time=0)
             ])]
 
-    coalesced = list(wf_trace.coalesce_haps(common_anc_haps))
+    coalesced = list(trace_tree.coalesce_haps(common_anc_haps))
     active = [h for h in coalesced if h.active is True]
     inactive = [h for h in coalesced if h.active is False] 
 
@@ -151,7 +151,7 @@ def test_pop(source_pops):
     n_loci = source_pops['args'].n_loci
 
     ## Initialize population
-    P = wf_trace.Population(ID, recs, n_gens, n_loci)
+    P = trace_tree.Population(ID, recs, n_gens, n_loci)
 
     for i in range(n_gens):
         check_gen(P)
@@ -186,11 +186,11 @@ def test_treesequence(source_pops):
     FSim = source_pops['FSim']
 
     ## Test conversion to msprime TreeSequence
-    P = wf_trace.Population(ID, recs, n_gens, n_loci)
+    P = trace_tree.Population(ID, recs, n_gens, n_loci)
     P.trace()
 
     positions = FSim.pop.lociPos()
-    T = wf_trace.TreeBuilder(P.haps, positions)
+    T = trace_tree.TreeBuilder(P.haps, positions)
 
     for t in T.ts.trees():
         assert t.num_leaves(t.root) == args.n_inds * 2
