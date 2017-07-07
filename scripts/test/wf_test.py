@@ -8,49 +8,42 @@ import forward_sim as fsim
 
 
 args = argparse.Namespace(
-        Na=100,
-        Ne=1000,
-        t_admix=10,
-        t_div=1000,
-        admixed_prop=0.5,
+        n_inds=100,
+        n_gens=10,
         rho=1e-8,
-        mu=1e-8,
-        length=1e6,
-        forward=False,
-        n_loci=100
+        L=1e8,
+        n_loci=100,
+        h5_out='gen.h5'
         )
 
 args2 = argparse.Namespace(
-        Na=30,
-        Ne=1000,
-        t_admix=30,
-        t_div=1000,
-        admixed_prop=0.5,
+        n_inds=30,
+        n_gens=30,
         rho=1e-8,
-        mu=1e-8,
-        length=1e6,
-        forward=False,
-        n_loci=10
+        L=1e8,
+        n_loci=20,
+        h5_out='gen.h5'
         )
 
 ## Each item in the list will be passed once to the tests
-params = [args] * 10 + [args2] * 10
+params = [args] * 5+ [args2] * 20
 
 
 @pytest.fixture(scope='module', params=params)
 def source_pops(request):
     args = request.param
-    ts = fsim.generate_source_pops(args)
-
-    simuPOP_haps = fsim.msprime_hap_to_simuPOP(ts)
-    positions = fsim.msprime_positions(ts)
-    pop = fsim.wf_init(simuPOP_haps, positions)
+    # ts = fsim.generate_source_pops(args)
+    #
+    # simuPOP_haps = fsim.msprime_hap_to_simuPOP(ts)
+    # positions = fsim.msprime_positions(ts)
+    # pop = fsim.wf_init(simuPOP_haps, positions)
 
     ## Generate forward simulations which track lineage
-    FSim = fsim.ForwardSim(args.Na,
-                           args.length,
-                           args.t_admix,
-                           args.n_loci)
+    FSim = fsim.ForwardSim(args.n_inds,
+                           args.L,
+                           args.n_gens,
+                           args.n_loci,
+                           args.rho)
 
     FSim.evolve()
 
@@ -58,40 +51,40 @@ def source_pops(request):
     recs = FSim.recs
 
     ## Write genotypes to file
-    FSim.write_haplotypes('gen.h5')
+    FSim.write_haplotypes(args.h5_out)
 
-    yield {'TreeSequence': ts, 'haplotypes': simuPOP_haps,
-            'positions': positions, 'simuPOP_pop': pop,
-            'args': args, 'ID': ID, 'recs': recs}
+    yield {#'TreeSequence': ts, 'haplotypes': simuPOP_haps,
+           #'positions': positions,
+           'FSim': FSim, 'args': args, 'ID': ID, 'recs': recs}
 
 
-def test_simuPOP(source_pops):
-    args = source_pops['args']
-    pop = source_pops['simuPOP_pop']
-    haplotypes = source_pops['haplotypes']
-    positions = source_pops['positions']
-
-    ## Make sure we've simulated a diploid population
-    assert len(haplotypes) == 2 * args.Na
-
-    ## Integer positions are suspicious, ie. not randomly generated
-    for pos in positions:
-        assert int(pos) != pos
-
-    ##TODO Sanity check for recombination rate +t1
-
-    ## Make sure haplotypes and positions align
-    n_sites = len(positions)
-    for hap in haplotypes:
-        assert len(hap) == n_sites
-
-    ## Make sure simuPOP population has proper haplotypes and positions
-    for ind in pop.individuals():
-        assert len(ind.genotype()) == 2 * n_sites
-        assert np.array_equal(np.array(pop.lociPos()), positions)
-
-        ## Make sure we don't have any new mutations
-        assert set(ind.genotype()) == set([0, 1])
+# def test_simuPOP(source_pops):
+#     args = source_pops['args']
+#     pop = source_pops['simuPOP_pop']
+#     haplotypes = source_pops['haplotypes']
+#     positions = source_pops['positions']
+#
+#     ## Make sure we've simulated a diploid population
+#     assert len(haplotypes) == 2 * args.n_inds
+#
+#     ## Integer positions are suspicious, ie. not randomly generated
+#     for pos in positions:
+#         assert int(pos) != pos
+#
+#     ##TODO Sanity check for recombination rate +t1
+#
+#     ## Make sure haplotypes and positions align
+#     n_sites = len(positions)
+#     for hap in haplotypes:
+#         assert len(hap) == n_sites
+#
+#     ## Make sure simuPOP population has proper haplotypes and positions
+#     for ind in pop.individuals():
+#         assert len(ind.genotype()) == 2 * n_sites
+#         assert np.array_equal(np.array(pop.lociPos()), positions)
+#
+#         ## Make sure we don't have any new mutations
+#         assert set(ind.genotype()) == set([0, 1])
 
 
 def test_haps():
@@ -154,7 +147,7 @@ def check_gen(Population):
 def test_pop(source_pops):
     ID = source_pops['ID']
     recs = source_pops['recs']
-    n_gens = source_pops['args'].t_admix
+    n_gens = source_pops['args'].n_gens
     n_loci = source_pops['args'].n_loci
 
     ## Initialize population
@@ -187,35 +180,30 @@ def test_pop(source_pops):
 def test_treesequence(source_pops):
     ID = source_pops['ID']
     recs = source_pops['recs']
-    n_gens = source_pops['args'].t_admix
+    n_gens = source_pops['args'].n_gens
     n_loci = source_pops['args'].n_loci
-    pop = source_pops['simuPOP_pop']
     args = source_pops['args']
-    ## Test conversion to msprime TreeSequence
+    FSim = source_pops['FSim']
 
+    ## Test conversion to msprime TreeSequence
     P = wf_trace.Population(ID, recs, n_gens, n_loci)
     P.trace()
 
-    positions = pop.lociPos()
-    T = wf_trace.WFTree(P.haps, positions)
-    ts = T.tree_sequence()
+    positions = FSim.pop.lociPos()
+    T = wf_trace.TreeBuilder(P.haps, positions)
 
-    trees = list(ts.trees())
+    for t in T.ts.trees():
+        assert t.num_leaves(t.root) == args.n_inds * 2
 
-    for t in trees:
-        assert t.num_leaves(t.root) == args.Na * 2
-
-    ## Check node genotypes
-    for t in ts.trees():
+    ## Check genotypes along tree lineages
+    for t in T.ts.trees():
         left, right = list(map(int, t.interval))
-        print("interval:", left, right)
-
-        genotypes = T.node_genotypes(t.nodes(), 'gen.h5')
+        genotypes = T.genotypes(t.nodes(), args.h5_out)
 
         for r in t.children(t.root):
-            print("Root node", r)
             g = set().union([tuple(genotypes[l][left:right])
                                 for l in t.leaves(r)])
+
+            ## All nodes should share a single genotype along the tree
             assert len(g) == 1
-            print(g)
 
