@@ -7,28 +7,33 @@ import attr
 from collections import defaultdict
 
 
-def get_idx(ID):
-    idx = 2 * np.abs(ID) - (np.sign(ID) - 1) / 2 - 2
-
-    ## Zero ID will give a negative number, which indicates no ind
-    assert (idx >= 0).all()
-
-    return idx.astype(int)
-
-
 def get_chrom(idx, start_chrom, breakpoints):
     """
     Returns the chromosome in which idx falls, given the recombinations
     provided, as either -1 or 1
     """
     if len(breakpoints) == 0:
-        return np.sign(start_chrom - 0.5).astype(int)
+        return start_chrom
 
     for i, b in enumerate(breakpoints):
         if b >= idx:
-            return np.sign((i + start_chrom) % 2 - 0.5).astype(int)
+            return (i + start_chrom) % 2
 
-    return np.sign((i + start_chrom - 1) % 2 - 0.5).astype(int)
+    return (i + start_chrom - 1) % 2
+
+
+def bool_to_signed(bool_val):
+    """
+    Converts 0/1 to 1/-1
+    """
+    return np.sign(-1 * bool_val + 0.5).astype(int)
+
+
+def signed_to_bool(signed_val):
+    """
+    Converts 1/-1 to 0/1
+    """
+    return int(-1 * (signed_val - 1) / 2)
 
 
 def region_overlap(regions):
@@ -242,7 +247,8 @@ class Population(object):
             ## Find which parental chromosome the haplotype inherits from,
             ## given that chrom is +-1 and chrom labels are signed
             chrom = get_chrom(hap.left, start_chrom, breakpoints)
-            new_node = parent * chrom
+            signed_chrom = bool_to_signed(chrom)
+            new_node = parent * signed_chrom
 
             if new_node in self.founders:
                 ## Store founders as an inactive node
@@ -253,7 +259,8 @@ class Population(object):
                 continue
 
             ## Climb to new node and discard old haplotype
-            # print(hap, "climbs to", new_node)
+            print(hap, "chrom", signed_to_bool(np.sign(hap.node)),
+                    "climbs to", new_node, "chrom", chrom)
             self.haps.add(hap.climb(new_node))
             self.haps.discard(hap)
 
@@ -300,7 +307,7 @@ class Population(object):
             self.coalesce()
 
         if self.coalesce_all is True:
-            print("Coalescing all remaning haps")
+            print("Coalescing all remaining haps")
             ## If set, coalesce all remaining haplotypes in a new node
             great_anc_node = 0
             for hap in self.uncoalesced_haps:
@@ -328,13 +335,16 @@ class WFTree(object):
         Builds list of nodes from provided haplotypes, storing relationship
         between hap ID and node list index
         """
-        for i, hap in enumerate(self.haps):
-            is_sample = np.uint32(hap.time == 0)
-            self.nodes.add_row(time=hap.time, population=0, flags=is_sample)
-            self.haps_idx[hap.node] = i
-            self.idx_haps[i] = hap.node
-
-        assert self.nodes.num_rows == len(self.haps)
+        i = 0
+        for hap in self.haps:
+            ## Store one node per individual, for all segments
+            if hap.node not in self.haps_idx:
+                is_sample = np.uint32(hap.time == 0)
+                self.nodes.add_row(time=hap.time, population=0,
+                                   flags=is_sample)
+                self.haps_idx[hap.node] = i
+                self.idx_haps[i] = hap.node
+                i += 1
 
 
     def hap_array(self):
@@ -347,6 +357,7 @@ class WFTree(object):
             children = sorted([self.haps_idx[c] for c in hap.children])
             if hap.time > 0 and len(children) > 1:
                 assert hap.active is False
+                assert self.nodes.flags[self.haps_idx[hap.node]] == 0
 
                 edge_records.append((hap.left, hap.right,
                                     self.haps_idx[hap.node],
@@ -408,7 +419,6 @@ class WFTree(object):
 
         ts = msprime.load_tables(nodes=self.nodes, edgesets=self.edgesets)
         ts.simplify()
-        assert ts.num_nodes == len(self.haps)
         samples = [h for h in self.haps if h.time == 0]
         assert len(list(ts.get_samples())) == len(samples)
 
@@ -421,19 +431,24 @@ class WFTree(object):
         """
         with tables.open_file(h5file, 'r') as f:
             ind_IDs = f.root.inds[:]
-            ID_idx = dict([(ID, i) for i, ID in enumerate(ind_IDs)])
+            uID_idx = dict([(ID, i) for i, ID in enumerate(ind_IDs)])
 
-            idx_node = [self.idx_haps[node] for node in nodes]
+            genotypes = {}
+            # if nodes == 'ALL':
+            #     genotypes = dict(zip(ind_IDs, f.root.haps[:]))
+            #     return genotypes
 
-            genotypes = []
-            for i, ID in enumerate(idx_node):
-                idx = ID_idx[np.abs(ID)]
-                chrom = (np.sign(ID) + 1) / 2
-                genotypes.append(f.root.haps[idx][chrom])
+            for node in nodes:
+                ID = self.idx_haps[node]
+                uID = np.abs(ID).astype(int)
+
+                try:
+                    file_idx = uID_idx[uID]
+                except KeyError:
+                    continue
+
+                chrom = signed_to_bool(np.sign(ID))
+                genotypes[node] = f.root.haps[file_idx][chrom]
+                assert f.root.inds[file_idx] == uID
 
         return genotypes
-
-
-
-            
-
