@@ -100,8 +100,8 @@ class ForwardSim(object):
     N = attr.ib()
     L = attr.ib()
     n_gens = attr.ib()
-    n_loci = attr.ib(default=1000)
-    rho = attr.ib(default=1e-8)
+    n_loci = attr.ib()
+    rho = attr.ib()
     output = attr.ib(default='genotypes.txt')
 
 
@@ -136,7 +136,7 @@ class ForwardSim(object):
         simu.evolve(
             initOps=[sim.IdTagger(),
                 sim.InitSex(),
-                sim.InitGenotype(freq=[0.2, 0.8]),
+                sim.InitGenotype(freq=[0.5, 0.5]),
                 sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
                 sim.InfoEval(get_ID, exposeInd='ind', output=ID),
                 sim.InfoEval(get_genotype_init, exposeInd='ind', output=self.output)
@@ -220,7 +220,6 @@ def parse_simuPOP_genotype(genotype_string):
     haplotypes = data[1:].reshape(1, 2, -1)
 
     return ind_ID, haplotypes
-
         
         
 def parse_output(output, n_gens, split=False):
