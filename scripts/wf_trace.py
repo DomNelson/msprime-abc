@@ -259,8 +259,6 @@ class Population(object):
                 continue
 
             ## Climb to new node and discard old haplotype
-            print(hap, "chrom", signed_to_bool(np.sign(hap.node)),
-                    "climbs to", new_node, "chrom", chrom)
             self.haps.add(hap.climb(new_node))
             self.haps.discard(hap)
 
@@ -318,7 +316,7 @@ class Population(object):
 
 
 @attr.s
-class WFTree(object):
+class TreeBuilder(object):
     haps = attr.ib(convert=list)
     positions = attr.ib(convert=list)
 
@@ -328,6 +326,7 @@ class WFTree(object):
         self.edgesets = msprime.EdgesetTable()
         self.haps_idx = {}
         self.idx_haps = {}
+        self.ts = self.tree_sequence()
 
 
     def add_nodes(self):
@@ -355,6 +354,8 @@ class WFTree(object):
         edge_records = []
         for hap in self.haps:
             children = sorted([self.haps_idx[c] for c in hap.children])
+
+            ## Exclude samples and uncoalesced lineages
             if hap.time > 0 and len(children) > 1:
                 assert hap.active is False
                 assert self.nodes.flags[self.haps_idx[hap.node]] == 0
@@ -425,7 +426,7 @@ class WFTree(object):
         return ts
 
 
-    def node_genotypes(self, nodes, h5file):
+    def genotypes(self, nodes, h5file):
         """
         Returns the full genotype associated with the provided node
         """
@@ -434,10 +435,6 @@ class WFTree(object):
             uID_idx = dict([(ID, i) for i, ID in enumerate(ind_IDs)])
 
             genotypes = {}
-            # if nodes == 'ALL':
-            #     genotypes = dict(zip(ind_IDs, f.root.haps[:]))
-            #     return genotypes
-
             for node in nodes:
                 ID = self.idx_haps[node]
                 uID = np.abs(ID).astype(int)
@@ -445,6 +442,7 @@ class WFTree(object):
                 try:
                     file_idx = uID_idx[uID]
                 except KeyError:
+                    print("No genotype for", node)
                     continue
 
                 chrom = signed_to_bool(np.sign(ID))
