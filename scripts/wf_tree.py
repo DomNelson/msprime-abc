@@ -17,19 +17,24 @@ class WFTree(object):
     L = attr.ib()
     n_loci = attr.ib()
     h5_out = attr.ib()
+    mu = attr.ib()
+    MAF = attr.ib()
 
 
     def __attrs_post_init__(self):
         self.simulate()
         self.trace()
+        self.muts = self.mutations()
 
 
     def simulate(self):
         """
         Performs forward simulations with simuPOP, saving genotypes to file
         """
-        self.FSim = fsim.ForwardSim(self.n_inds, self.L, self.n_gens,
-                               self.n_loci, self.rho)
+        init_pop = fsim.MAFPop(self.n_inds, self.rho, self.L, self.mu,
+                            self.n_loci, self.MAF)
+
+        self.FSim = fsim.ForwardSim(self.n_gens, init_pop.pop)
         self.FSim.evolve()
         self.FSim.write_haplotypes(self.h5_out)
 
@@ -42,13 +47,13 @@ class WFTree(object):
         """
         Traces lineages through forward simulations
         """
-        P = trace_tree.Population(self.ID, self.recs, self.n_gens,
+        self.P = trace_tree.Population(self.ID, self.recs, self.n_gens,
                              self.n_loci)
-        P.trace()
+        self.P.trace()
 
         ## Convert traces haplotypes into an msprime TreeSequence
         self.positions = self.FSim.pop.lociPos()
-        self.T = trace_tree.TreeBuilder(P.haps, self.positions)
+        self.T = trace_tree.TreeBuilder(self.P.haps, self.positions)
         self.ts = self.T.tree_sequence()
 
 
@@ -59,7 +64,21 @@ class WFTree(object):
         return self.T.genotypes(nodes, self.h5_out)
 
 
-    def draw_locus(self, locus, out_file='tree.svg'):
+    def mutations(self):
+        """
+        Return mutation events as a structured numpy array
+        """
+        muts = self.FSim.muts
+
+        ## Convert simuPOP IDs into their corresponding tree node IDs
+        ts_IDs = [self.T.haps_idx[sim_ID] for sim_ID in muts['ID']]
+
+        muts['ID'] = ts_IDs
+
+        return muts
+
+
+    def plot_locus(self, locus, out_file='tree.svg'):
         """
         Draws the coalescent tree associated with the specified locus
         """
@@ -82,9 +101,11 @@ if __name__ == "__main__":
             n_inds=10,
             n_gens=2,
             rho=1e-8,
+            mu=1e-7,
             L=1e8,
             n_loci=20,
-            h5_out='gen.h5'
+            h5_out='gen.h5',
+            MAF=0.1
             )
 
     W = main(args)
