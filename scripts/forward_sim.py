@@ -11,118 +11,6 @@ from collections import namedtuple
 
 
 @attr.s
-class Pop(object):
-    ## Population parameters
-    rho = attr.ib()
-    mu = attr.ib()
-
-    ## simuPOP population
-    pop = attr.ib()
-
-
-@attr.s
-class MsprimePop(object):
-    N = attr.ib()
-    rho = attr.ib()
-    L = attr.ib()
-    mu = attr.ib()
-    Ne = attr.ib()
-    t_div = attr.ib()
-    admixed_prop = attr.ib()
-    ploidy = attr.ib(default=2)
-
-
-    def __attrs_post_init__(self):
-        self.ts = self.generate_source_pops()
-
-
-    def generate_source_pops(self):
-        ## Initialize admixed and source populations with two chromosomes
-        ## per ind
-        pop0_size = int(2 * self.N * self.admixed_prop)
-        pop1_size = 2 * self.N - pop0_size
-
-        population_configurations = [
-                msprime.PopulationConfiguration(
-                        sample_size=pop0_size,
-                        growth_rate=0),
-                msprime.PopulationConfiguration(
-                        sample_size=pop1_size,
-                        growth_rate=0)]
-
-        ## Specify admixture event
-        demographic_events = [
-                msprime.MassMigration(
-                        time=self.t_div,
-                        source=0,
-                        destination=1,
-                        proportion=1.)]
-                
-        ## Coalescent simulation
-        ts = msprime.simulate(
-                population_configurations=population_configurations,
-                demographic_events=demographic_events,
-                recombination_rate=self.rho,
-                length=self.L,
-                mutation_rate=self.mu,
-                Ne=self.Ne)
-
-        return ts
-
-
-    def as_simuPOP(self):
-        """
-        Returns a simuPOP population initialized with the results of the
-        msprime coalescent simulation
-        """
-        haps = msprime_hap_to_simuPOP(self.ts)
-        positions = msprime_positions(self.ts)
-
-        simuPOP_pop = wf_init(haps, positions, self.ploidy)
-
-        return Pop(rho=self.rho, mu=self.mu, pop=simuPOP_pop)
-
-
-@attr.s
-class MAFPop(object):
-    """
-    Initializes a simuPOP population for forward simulations by specifying
-    a MAF in the founding generation
-    """
-    N = attr.ib()
-    rho = attr.ib()
-    L = attr.ib()
-    mu = attr.ib()
-    n_loci = attr.ib()
-    MAF = attr.ib(convert=float)
-    ploidy = attr.ib(default=2)
-
-
-    def __attrs_post_init__(self):
-        ##TODO: Specify allele frequencies for all loci +t1
-        self.freqs = [1-self.MAF, self.MAF]
-        self.pop = self.as_simuPOP()
-
-
-    def as_simuPOP(self):
-        """
-        Draws random loci along the genome and initializes genotypes in the
-        specified proportions
-        """
-        positions = np.random.uniform(0, self.L, size=self.n_loci)
-        haps_shape = (self.N * self.ploidy, self.n_loci)
-        haps = np.random.choice([0, 1], p=self.freqs, size=haps_shape)
-
-        ## Convert to lists with types expected by simuPOP
-        positions = list(map(float, positions))
-        haps = [list(map(int, h)) for h in haps]
-
-        simuPOP_pop = wf_init(haps, positions, self.ploidy)
-
-        return Pop(rho=self.rho, mu=self.mu, pop=simuPOP_pop)
-
-
-@attr.s
 class ForwardSim(object):
     n_gens = attr.ib()
     initial_pop = attr.ib()
@@ -133,18 +21,21 @@ class ForwardSim(object):
         self.rho = self.initial_pop.rho
         self.mu = self.initial_pop.mu
         self.pop = self.initial_pop.pop
+        self.migmat = self.initial_pop.migmat
 
-        ## Set attributes we need to track lineages
-        info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe']
-        self.pop.setInfoFields(info_fields)
+        ## Make sure proper info fields are present to track lineages
+        info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe',
+                        'migrate_to', 'initial_pop']
+        assert set(info_fields).issubset(self.pop.infoFields())
 
         ##NOTE: Assumes only one chromosome +n1
         assert len(self.pop.numLoci()) == 1
         self.n_loci = self.pop.numLoci()[0]
+        assert self.n_loci > 0
         self.L = self.pop.genoSize() / self.pop.ploidy()
 
 
-    def evolve(self):
+    def evolve(self, save_genotypes=True):
         """
         Traces the lineage of a given number of evenly-spaced loci along a
         single chromosome, in a randomly mating population of size N
@@ -168,26 +59,36 @@ class ForwardSim(object):
         ## length 'n_loci'
         intensity = self.L * self.rho / self.n_loci
 
+        ## Set whether genotypes are output to file or not
+        if save_genotypes is True:
+            save_genotype_op = [sim.InfoEval(get_genotype, exposeInd='ind',
+                          output='>>' + self.output)]
+        else:
+            save_genotype_op = []
+
+        ## Set migrations if more than one sub-population is present
+        if self.pop.numSubPop() > 1:
+            migrate_op = [sim.Migrator(rate=self.migmat)]
+        else:
+            migrate_op = []
+
+
         simu = sim.Simulator(self.pop, stealPops=True, rep=1)
         simu.evolve(
             initOps=[sim.IdTagger(),
                 sim.InitSex(),
                 sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
-                sim.InfoEval(get_ID, exposeInd='ind', output=ID),
-                sim.InfoEval(get_genotype_init, exposeInd='ind',
-                             output=self.output)
-            ],
-            preOps=[sim.SNPMutator(u=self.mu, output=muts)],
+                sim.InfoEval(get_ID, exposeInd='ind', output=ID)] \
+                        + save_genotype_op,
+            preOps=[sim.SNPMutator(u=self.mu, output=muts)] + migrate_op,
             matingScheme=sim.RandomMating(
                 ops=[sim.IdTagger(),
                      sim.Recombinator(intensity=intensity,
                                       output=recs,
                                       infoFields='ind_id')]
                      ),
-            postOps=[sim.InfoEval(get_ID, exposeInd='ind', output=ID),
-                 sim.InfoEval(get_genotype, exposeInd='ind',
-                              output='>>' + self.output),
-                 ],
+            postOps=[sim.InfoEval(get_ID, exposeInd='ind', output=ID)] \
+                        + save_genotype_op,
                 gen=self.n_gens
             )
 
@@ -306,38 +207,6 @@ def sort_recombs(rec_str):
     return list(map(lambda x: list(map(int, x.split(' '))), recs))
 
 
-def msprime_hap_to_simuPOP(TreeSequence):
-    """
-    Takes msprime haplotypes and returns them in a format readable by simuPOP
-    """
-    haplotypes = TreeSequence.haplotypes()
-    simuPOP_haps = [list(map(int, list(str(x)))) for x in haplotypes]
-
-    return simuPOP_haps
-
-
-def msprime_positions(TreeSequence):
-    """ Returns position of mutations in TreeSequence """
-    ##TODO Could be done in the haplotype loop above +t3
-    return [site.position for site in TreeSequence.sites()]
-
-
-def wf_init(haplotypes, positions, ploidy=2):
-    """
-    Initializes a simuPOP population using the provided haplotypes
-    """
-    ##NOTE: Assumes a single chromosome +n1
-    pop = sim.Population(size=[len(haplotypes)/2], ploidy=ploidy)
-    pop.addLoci([0] * len(positions), positions)
-    
-    ## Set genotypes for each individual separately
-    ##TODO Probably a more efficient way of setting genotypes +t2
-    for ind, gen in zip(pop.individuals(), haplotypes):
-        ind.setGenotype(gen)
-
-    return pop
-
-
 def parse_mutants(mutant_data):
     """
     Returns each mutation event as a tuple, read form simuPOP output string
@@ -364,3 +233,5 @@ def store_mutants(mutant_data):
         mut_array = np.array([], dtype=dtypes)
 
     return mut_array
+
+

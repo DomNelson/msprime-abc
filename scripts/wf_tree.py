@@ -6,6 +6,7 @@ import configparser
 import attr
 
 import forward_sim as fsim
+import pop_models
 import trace_tree
 
 
@@ -15,28 +16,45 @@ class WFTree(object):
     n_gens = attr.ib()
     rho = attr.ib()
     L = attr.ib()
-    n_loci = attr.ib()
+    # n_loci = attr.ib() # Set from msprime initial pop
     h5_out = attr.ib()
     mu = attr.ib()
     MAF = attr.ib()
+    trace_trees = attr.ib(default=True)
+    Ne = attr.ib(default=1000)
+    sample_size = attr.ib(default='all')
+    save_genotypes = attr.ib(default=True)
+    t_div = attr.ib(default=100)
+    mig_prob = attr.ib(default=0)
+    grid_width = attr.ib(default=3)
+    ploidy = attr.ib(default=2)
 
 
     def __attrs_post_init__(self):
         self.simulate()
-        self.trace()
-        self.muts = self.mutations()
+
+        if self.trace_trees is True:
+            self.trace()
 
 
     def simulate(self):
         """
         Performs forward simulations with simuPOP, saving genotypes to file
         """
-        init_pop = fsim.MAFPop(self.n_inds, self.rho, self.L, self.mu,
-                            self.n_loci, self.MAF)
+        ## Create initial population
+        self.msp_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
+                        rho=self.rho,
+                        L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
+                        mig_prob=self.mig_prob, grid_width=self.grid_width)
 
-        self.FSim = fsim.ForwardSim(self.n_gens, init_pop.pop)
-        self.FSim.evolve()
-        self.FSim.write_haplotypes(self.h5_out)
+        init_pop = pop_models.msp_to_simuPOP(self.msp_pop)
+
+        ##TODO: Implement mutations in forward sims +t1
+        self.FSim = fsim.ForwardSim(self.n_gens, init_pop)
+        self.FSim.evolve(self.save_genotypes)
+
+        if self.save_genotypes is True:
+            self.FSim.write_haplotypes(self.h5_out)
 
         ## Initialize population and trace haplotype lineages
         self.ID = self.FSim.ID.ravel()
@@ -47,8 +65,11 @@ class WFTree(object):
         """
         Traces lineages through forward simulations
         """
-        self.P = trace_tree.Population(self.ID, self.recs, self.n_gens,
-                             self.n_loci)
+        ## Set number of loci from initial population
+        ##NOTE: Assumes a single chromosome +n2
+        n_loci = self.FSim.pop.numLoci()[0]
+        self.P = trace_tree.Population(self.ID, self.recs, self.n_gens, n_loci,
+                                        sample_size=self.sample_size)
         self.P.trace()
 
         ## Convert traces haplotypes into an msprime TreeSequence
@@ -64,10 +85,19 @@ class WFTree(object):
         return self.T.genotypes(nodes, self.h5_out)
 
 
-    def mutations(self):
+    def mutate(self):
+        """
+        Thrown down mutations on constructed tree sequence, replacing
+        self.ts with new mutated (but otherwise identical) tree sequence
+        """
+        self.ts = trace_tree.mutate_ts(self.ts, self.mu)
+
+
+    def _mutations(self):
         """
         Return mutation events as a structured numpy array
         """
+        ##TODO: Nothing here until we implement selection +t1
         muts = self.FSim.muts
 
         ## Convert simuPOP IDs into their corresponding tree node IDs
@@ -86,7 +116,7 @@ class WFTree(object):
             left, right = t.interval
 
             if left <= locus < right:
-                t.draw(out_file, width=5000, height=500, show_times=True)
+                t.draw(out_file, width=500, height=500, show_times=True)
                 break
 
 
@@ -98,14 +128,17 @@ def main(args):
 
 if __name__ == "__main__":
     args = argparse.Namespace(
-            n_inds=10,
-            n_gens=2,
+            n_inds=100,
+            Ne=100,
+            n_gens=10,
             rho=1e-8,
-            mu=1e-7,
+            mu=1e-10,
             L=1e8,
-            n_loci=20,
+            mig_prob=0.05,
+            # n_loci=20,
             h5_out='gen.h5',
-            MAF=0.1
+            MAF=0.1,
+            save_genotypes=False
             )
 
     W = main(args)

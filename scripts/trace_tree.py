@@ -5,6 +5,8 @@ import msprime
 from profilehooks import timecall
 import attr
 from collections import defaultdict
+import _msprime
+from _msprime import MutationGenerator, RandomGenerator
 
 
 def get_chrom(idx, start_chrom, breakpoints):
@@ -175,6 +177,7 @@ class Population(object):
     n_gens = attr.ib()
     n_loci = attr.ib()
     coalesce_all = attr.ib(default=True)
+    sample_size = attr.ib(default='all')
 
 
     def __attrs_post_init__(self):
@@ -198,6 +201,9 @@ class Population(object):
 
         ##NOTE Assumes constant generation size +n1
         nodes = self.ID[-self.n_inds:]
+        if self.sample_size != 'all':
+            nodes = np.random.choice(nodes, size=self.sample_size)
+
         left = 0
         right = self.n_loci
         time = 0
@@ -450,3 +456,33 @@ class TreeBuilder(object):
                 assert f.root.inds[file_idx] == uID
 
         return genotypes
+
+
+def mutate_ts(ts, mu, seed=None):
+    """
+    Throws down mutations at rate mu on the provided tree sequence
+    """
+    if seed is None:
+        seed = np.random.randint(1, 2**32)
+
+    rng = RandomGenerator(seed)
+    m = MutationGenerator(rng, mu)
+
+    ##TODO: May be a cleaner way of handling these tables +t3
+    ts_tables = ts.dump_tables()
+    node_table = ts_tables.nodes
+    edgeset_table = ts_tables.edgesets
+    migrations_table = ts_tables.migrations
+    mutation_table = ts_tables.mutations
+    mutation_type_table = ts_tables.sites
+
+    ## Generate mutations on the tree sequence
+    m.generate(node_table, edgeset_table, mutation_type_table,
+                mutation_table)
+
+    ## Create new tree sequence containing the mutations
+    ts = ts.load_tables(nodes=node_table, edgesets=edgeset_table,
+                    mutations=mutation_table, sites=mutation_type_table,
+                    migrations=migrations_table)
+
+    return ts

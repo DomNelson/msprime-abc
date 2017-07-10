@@ -1,7 +1,7 @@
 # msprime-abc
 Demographic inference and more, using msprime and simuPOP
 
-## WFTree
+## wf\_tree.py
 ### Known Issues:
 * ~~No mutations~~ - Simple dialleleic mutations using parameter *mu* stored in *self.muts*
 * Fixed population size per generation
