@@ -1,6 +1,8 @@
 import numpy as np
 import attr
 import msprime
+import simuOpt
+simuOpt.setOptions(alleleType='lineage', quiet=True)
 import simuPOP as sim
 from collections import defaultdict, Counter
 

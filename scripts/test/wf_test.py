@@ -4,6 +4,7 @@ import pytest
 sys.path.append(os.path.abspath('../'))
 import argparse
 import trace_tree
+import pop_models
 import forward_sim as fsim
 
 
@@ -13,7 +14,13 @@ args = argparse.Namespace(
         rho=1e-8,
         L=1e8,
         n_loci=100,
-        h5_out='gen.h5'
+        h5_out='gen.h5',
+        ploidy=2,
+        mu=1e-9,
+        t_div=100,
+        grid_width=2,
+        mig_prob=0.1,
+        Ne=1000
         )
 
 args2 = argparse.Namespace(
@@ -22,69 +29,77 @@ args2 = argparse.Namespace(
         rho=1e-8,
         L=1e8,
         n_loci=20,
-        h5_out='gen.h5'
+        h5_out='gen.h5',
+        ploidy=2,
+        mu=1e-9,
+        t_div=100,
+        grid_width=1,
+        mig_prob=0.1,
+        Ne=1000
         )
 
 ## Each item in the list will be passed once to the tests
-params = [args] * 5+ [args2] * 20
+params = [args] * 5 + [args2] * 20
 
 
 @pytest.fixture(scope='module', params=params)
 def source_pops(request):
     args = request.param
-    # ts = fsim.generate_source_pops(args)
-    #
-    # simuPOP_haps = fsim.msprime_hap_to_simuPOP(ts)
-    # positions = fsim.msprime_positions(ts)
-    # pop = fsim.wf_init(simuPOP_haps, positions)
 
     ## Generate forward simulations which track lineage
-    FSim = fsim.ForwardSim(args.n_inds,
-                           args.L,
-                           args.n_gens,
-                           args.n_loci,
-                           args.rho)
+    msp_pop = pop_models.grid_ts(N=args.n_inds*args.ploidy,
+                    rho=args.rho, L=args.L, mu=args.mu, t_div=args.t_div,
+                    Ne=args.Ne, mig_prob=args.mig_prob,
+                    grid_width=args.grid_width)
 
-    FSim.evolve()
+    init_pop = pop_models.msp_to_simuPOP(msp_pop)
+
+    ##TODO: Implement mutations in forward sims +t1
+    FSim = fsim.ForwardSim(args.n_gens, init_pop)
+    FSim.evolve(save_genotypes=True)
 
     ID = FSim.ID.ravel()
     recs = FSim.recs
+    simuPOP_haps, pops = pop_models.msprime_hap_to_simuPOP(msp_pop.ts)
+    positions = pop_models.msprime_positions(msp_pop.ts)
 
     ## Write genotypes to file
     FSim.write_haplotypes(args.h5_out)
 
-    yield {#'TreeSequence': ts, 'haplotypes': simuPOP_haps,
-           #'positions': positions,
+    yield {#'TreeSequence': ts,
+            'haplotypes': simuPOP_haps, 'positions': positions,
            'FSim': FSim, 'args': args, 'ID': ID, 'recs': recs}
 
 
-# def test_simuPOP(source_pops):
-#     args = source_pops['args']
-#     pop = source_pops['simuPOP_pop']
-#     haplotypes = source_pops['haplotypes']
-#     positions = source_pops['positions']
-#
-#     ## Make sure we've simulated a diploid population
-#     assert len(haplotypes) == 2 * args.n_inds
-#
-#     ## Integer positions are suspicious, ie. not randomly generated
-#     for pos in positions:
-#         assert int(pos) != pos
-#
-#     ##TODO Sanity check for recombination rate +t1
-#
-#     ## Make sure haplotypes and positions align
-#     n_sites = len(positions)
-#     for hap in haplotypes:
-#         assert len(hap) == n_sites
-#
-#     ## Make sure simuPOP population has proper haplotypes and positions
-#     for ind in pop.individuals():
-#         assert len(ind.genotype()) == 2 * n_sites
-#         assert np.array_equal(np.array(pop.lociPos()), positions)
-#
-#         ## Make sure we don't have any new mutations
-#         assert set(ind.genotype()) == set([0, 1])
+def test_simuPOP(source_pops):
+    args = source_pops['args']
+    pop = source_pops['FSim'].pop
+    haplotypes = source_pops['haplotypes']
+    positions = source_pops['positions']
+
+    ## Make sure we've simulated the right number of individuals, remembering
+    ## that homologous chromosomes are concatenated together
+    assert len(haplotypes) == args.n_inds
+
+    ## Integer positions are suspicious, ie. not randomly generated
+    for pos in positions:
+        assert int(pos) != pos
+
+    ##TODO Sanity check for recombination rate +t1
+
+    ## Make sure haplotypes and positions align
+    n_sites = len(positions)
+    for hap in haplotypes:
+        ## Each haplotype contains 'ploidy' concatenated chromosomes
+        assert len(hap) == args.ploidy * n_sites
+
+    ## Make sure simuPOP population has proper haplotypes and positions
+    for ind in pop.individuals():
+        assert len(ind.genotype()) == 2 * n_sites
+        assert np.array_equal(np.array(pop.lociPos()), positions)
+
+        ## Make sure we don't have any new mutations
+        assert set(ind.genotype()) == set([0, 1])
 
 
 def test_haps():

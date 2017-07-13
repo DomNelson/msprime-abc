@@ -1,6 +1,6 @@
 import simuOpt
-import tables
 simuOpt.setOptions(alleleType='lineage', quiet=True)
+import tables
 import attr
 import io
 import msprime
