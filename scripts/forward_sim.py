@@ -211,13 +211,17 @@ def parse_mutants(mutant_data):
     """
     Returns each mutation event as a tuple, read form simuPOP output string
     """
+    sci_notation_to_int = lambda x: int(float(x))
     for line in mutant_data.split('\n'):
         # a trailing \n will lead to an empty string
         if not line:
             continue
         (gen, loc, ploidy, a1, a2, ID) = line.split('\t')
+        loc = sci_notation_to_int(loc)
+        a1 = sci_notation_to_int(a1)
+        a2 = sci_notation_to_int(a2)
+        ID = sci_notation_to_int(ID)
         yield gen, loc, ploidy, a1, a2, ID
-
 
 def store_mutants(mutant_data):
     """
