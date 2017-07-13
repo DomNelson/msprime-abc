@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 sys.path.append(os.path.abspath('../'))
 import argparse
+import copy
 import trace_tree
 import pop_models
 import forward_sim as fsim
@@ -39,7 +40,7 @@ args2 = argparse.Namespace(
         )
 
 ## Each item in the list will be passed once to the tests
-params = [args] * 5 + [args2] * 20
+params = [args] * 1 + [args2] * 1
 
 
 @pytest.fixture(scope='module', params=params)
@@ -56,6 +57,7 @@ def source_pops(request):
 
     ##TODO: Implement mutations in forward sims +t1
     FSim = fsim.ForwardSim(args.n_gens, init_pop)
+    FSim_init = copy.deepcopy(FSim)
     FSim.evolve(save_genotypes=True)
 
     ID = FSim.ID.ravel()
@@ -66,7 +68,7 @@ def source_pops(request):
     ## Write genotypes to file
     FSim.write_haplotypes(args.h5_out)
 
-    yield {#'TreeSequence': ts,
+    yield {'ts_init': msp_pop.ts, 'FSim_init': FSim_init,
             'haplotypes': simuPOP_haps, 'positions': positions,
            'FSim': FSim, 'args': args, 'ID': ID, 'recs': recs}
 
@@ -221,4 +223,29 @@ def test_treesequence(source_pops):
 
             ## All nodes should share a single genotype along the tree
             assert len(g) == 1
+
+
+def test_simuPOP_init(source_pops):
+    """
+    Tests that simuPOP subpopulations are initialized from msprime populations
+    properly
+    """
+    simuPOP_init = source_pops['FSim_init'].pop
+    ts_init = source_pops['ts_init']
+
+    sim_pop_freqs = list(pop_models.simuPOP_pop_freqs(simuPOP_init))
+    ts_freqs = list(pop_models.msprime_pop_freqs(ts_init))
+
+    assert len(sim_pop_freqs) == len(ts_freqs)
+
+    for (sim_pop, sim_freq), (ts_pop, ts_freq) in zip(sim_pop_freqs, ts_freqs):
+        assert sim_pop == ts_pop
+        assert sim_freq.shape == ts_freq.shape
+        assert np.max(sim_freq) > 0
+        print(sim_freq[:20], ts_freq[:20])
+        assert (sim_freq == ts_freq).all()
+
+
+
+
 

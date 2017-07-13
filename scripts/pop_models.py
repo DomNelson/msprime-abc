@@ -67,6 +67,37 @@ def msprime_hap_to_simuPOP(ts, ploidy=2):
     return inds.tolist(), pops.astype(float)
 
 
+def msprime_pop_freqs(ts, ploidy=2):
+    """
+    Returns the allele frequency of each locus in a tree sequence, collected
+    by population
+    """
+    inds, pops = msprime_hap_to_simuPOP(ts)
+
+    ## Collect inds by population
+    pop_inds = defaultdict(list)
+    for ind, pop in zip(inds, pops):
+        pop_inds[pop].append(ind)
+
+    ## Calculate allele frequencies for each pop
+    for pop, ind_list in pop_inds.items():
+        allele_counts = np.vstack(ind_list).sum(axis=0)
+        
+        yield pop, allele_counts / len(ind_list)
+
+
+def simuPOP_pop_freqs(pop, ploidy=2):
+    """
+    Returns the allele frequency of each locus in each subpopulation of a
+    simuPOP population
+    """
+    for i in range(pop.numSubPop()):
+        inds = [ind.genotype() for ind in pop.individuals(i)]
+        allele_counts = np.vstack(inds).sum(axis=0)
+
+        yield i, allele_counts / len(inds)
+
+
 def msprime_positions(TreeSequence):
     """ Returns position of mutations in TreeSequence """
     ##TODO Could be done in the haplotype loop above +t3
