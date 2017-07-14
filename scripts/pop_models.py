@@ -86,14 +86,18 @@ def msprime_pop_freqs(ts, ploidy=2):
         yield pop, allele_counts / len(ind_list)
 
 
-def simuPOP_pop_freqs(pop, ploidy=2):
+def simuPOP_pop_freqs(pop, loci=True, ploidy=2):
     """
-    Returns the allele frequency of each locus in each subpopulation of a
-    simuPOP population
+    Returns the allele frequency of specified loci in each subpopulation of a
+    simuPOP population, defaulting to all loci
     """
     for i in range(pop.numSubPop()):
         inds = [ind.genotype() for ind in pop.individuals(i)]
-        allele_counts = np.vstack(inds).sum(axis=0)
+
+        if loci is True:
+            allele_counts = np.vstack(inds).sum(axis=0)
+        else:
+            allele_counts = np.vstack(inds)[loci].sum(axis=0)
 
         yield i, allele_counts / len(inds)
 

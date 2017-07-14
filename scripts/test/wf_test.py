@@ -72,8 +72,8 @@ def source_pops(request):
     init_pop = pop_models.msp_to_simuPOP(msp_pop)
 
     ##TODO: Implement mutations in forward sims +t1
-    FSim = fsim.ForwardSim(args.n_gens, init_pop)
-    FSim.evolve(save_genotypes=True)
+    FSim = fsim.ForwardSim(args.n_gens, init_pop, save_genotypes=True)
+    FSim.evolve()
 
     ID = FSim.ID.ravel()
     recs = FSim.recs

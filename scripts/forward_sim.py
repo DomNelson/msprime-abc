@@ -7,7 +7,8 @@ import msprime
 import simuPOP as sim
 import numpy as np
 import sys, os
-from collections import namedtuple
+
+import pop_models
 
 
 @attr.s
@@ -15,6 +16,9 @@ class ForwardSim(object):
     n_gens = attr.ib()
     initial_pop = attr.ib()
     output = attr.ib(default='genotypes.txt')
+    track_pops = attr.ib(default=True, convert=bool)
+    track_loci = attr.ib(default=False)
+    save_genotypes = attr.ib(default=True)
 
 
     def __attrs_post_init__(self):
@@ -35,6 +39,8 @@ class ForwardSim(object):
         self.L = self.pop.genoSize() / self.pop.ploidy()
 
         ## Set details of population evolution
+        assert (type(self.track_loci) is bool or
+                                hasattr(self.track_loci, '__iter__'))
         self.set_Ops()
 
 
@@ -44,13 +50,41 @@ class ForwardSim(object):
         self.ID_IO  = io.StringIO()
         self.recs_IO = io.StringIO()
         self.muts_IO = io.StringIO()
-        self.subpops = []
 
         ## Set operations to be performed during simuPOP population evolution
         self.set_initOps()
         self.set_preOps()
         self.set_matingScheme()
         self.set_postOps()
+        self.set_options()
+
+
+    def set_options(self):
+        """
+        Updates operators based on initialization args, which act on each
+        generation of the forward simulation
+        """
+        ## Set whether genotypes are output to file or not
+        if self.save_genotypes is True:
+            get_genotype = "str(int(ind.info('ind_id'))) + ','" +\
+                            "+ str(ind.genotype()).strip('[]') + '\\n'"
+
+            self.initOps.append(sim.InfoEval(get_genotype, exposeInd='ind',
+                          output='>>' + self.output))
+            self.postOps.append(sim.InfoEval(get_genotype, exposeInd='ind',
+                          output='>>' + self.output))
+
+        ## Set whether deme/subpop info is saved for each individual
+        if self.track_pops is True:
+            self.subpops = []
+            self.initOps.append(sim.PyOperator(self.get_pop_inds))
+            self.postOps.append(sim.PyOperator(self.get_pop_inds))
+
+        ## Set whether allele frequencies at specified loci are saved
+        if self.track_loci is not False:
+            self.loci_freqs = []
+            self.initOps.append(sim.PyOperator(self.get_freqs))
+            self.postOps.append(sim.PyOperator(self.get_freqs))
 
 
     def set_initOps(self):
@@ -63,7 +97,6 @@ class ForwardSim(object):
         self.initOps = [sim.IdTagger(),
                         sim.InitSex(),
                         sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
-                        sim.PyOperator(self.get_pop_inds),
                         sim.InfoEval(get_ID, exposeInd='ind',
                                         output=self.ID_IO)]
 
@@ -98,25 +131,14 @@ class ForwardSim(object):
         get_ID = 'str(int(ind.info("ind_id"))) + "\t"'
 
         self.postOps = [sim.InfoEval(get_ID, exposeInd='ind',
-                                output=self.ID_IO),
-                        sim.PyOperator(self.get_pop_inds)]
+                                output=self.ID_IO)]
 
 
-    def evolve(self, save_genotypes=True):
+    def evolve(self):
         """
         Traces the lineage of a given number of evenly-spaced loci along a
         single chromosome, in a randomly mating population of size N
         """
-        ## Set whether genotypes are output to file or not
-        if save_genotypes is True:
-            get_genotype = "str(int(ind.info('ind_id'))) + ','" +\
-                            "+ str(ind.genotype()).strip('[]') + '\\n'"
-
-            self.initOps.append(sim.InfoEval(get_genotype, exposeInd='ind',
-                          output='>>' + self.output))
-            self.postOps.append(sim.InfoEval(get_genotype, exposeInd='ind',
-                          output='>>' + self.output))
-
         ## Initialize population, making sure that ind IDs start at 1
         sim.IdTagger().reset(1)
 
@@ -138,6 +160,18 @@ class ForwardSim(object):
         for sp in range(pop.numSubPop()):
             for ind in pop.individuals(sp):
                 self.subpops.extend([ind.ind_id, sp])
+
+        return True
+
+
+    def get_freqs(self, pop):
+        """
+        For execution during simuPOP population evolution, returns the allele
+        frequency spectrum for each subpopulation
+        """
+        self.loci_freqs.append(
+                list(pop_models.simuPOP_pop_freqs(pop, loci=self.track_loci,
+                                        ploidy=self.pop.ploidy)))
 
         return True
 

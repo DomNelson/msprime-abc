@@ -56,6 +56,7 @@ class WFTree(object):
     trace_trees = attr.ib(default=True)
     sample_size = attr.ib(default='all')
     save_genotypes = attr.ib(default=True)
+    track_loci = attr.ib(default=False)
 
 
     def __attrs_post_init__(self):
@@ -69,8 +70,9 @@ class WFTree(object):
         """
         Performs forward simulations with simuPOP, saving genotypes to file
         """
-        self.FSim = fsim.ForwardSim(self.n_gens, self.initial_pop)
-        self.FSim.evolve(self.save_genotypes)
+        self.FSim = fsim.ForwardSim(self.n_gens, self.initial_pop,
+                                                    track_loci=self.track_loci)
+        self.FSim.evolve()
 
         ##TODO: Save directly to hdf5 file +t2
         if self.save_genotypes is True:
@@ -155,7 +157,8 @@ def main(args):
             initial_pop=initial_pop.pop,
             n_gens=args.n_gens,
             h5_out=args.h5_out,
-            save_genotypes=args.save_genotypes)
+            save_genotypes=args.save_genotypes,
+            track_loci=args.track_loci)
 
     return W
 
@@ -172,7 +175,8 @@ if __name__ == "__main__":
             # n_loci=20,
             h5_out='gen.h5',
             MAF=0.1,
-            save_genotypes=False
+            save_genotypes=False,
+            track_loci=True
             )
 
     W = main(args)
