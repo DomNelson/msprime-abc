@@ -22,7 +22,6 @@ class ForwardSim(object):
         self.mu = self.initial_pop.mu
         self.pop = self.initial_pop.pop
         self.migmat = self.initial_pop.migmat
-        self.subpops = []
 
         ## Make sure proper info fields are present to track lineages
         info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe',
@@ -45,6 +44,7 @@ class ForwardSim(object):
         self.ID_IO  = io.StringIO()
         self.recs_IO = io.StringIO()
         self.muts_IO = io.StringIO()
+        self.subpops = []
 
         ## Set operations to be performed during simuPOP population evolution
         self.set_initOps()
@@ -63,6 +63,7 @@ class ForwardSim(object):
         self.initOps = [sim.IdTagger(),
                         sim.InitSex(),
                         sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
+                        sim.PyOperator(self.get_pop_inds),
                         sim.InfoEval(get_ID, exposeInd='ind',
                                         output=self.ID_IO)]
 
@@ -71,8 +72,7 @@ class ForwardSim(object):
         """
         Sets the operators to be executed before mating in each generation 
         """
-        self.preOps = [sim.SNPMutator(u=self.mu, output=self.muts_IO),
-                        sim.PyOperator(self.get_pop_inds)]
+        self.preOps = [sim.SNPMutator(u=self.mu, output=self.muts_IO)]
 
         ## Set migrations if more than one sub-population is present
         if self.pop.numSubPop() > 1:
@@ -98,7 +98,8 @@ class ForwardSim(object):
         get_ID = 'str(int(ind.info("ind_id"))) + "\t"'
 
         self.postOps = [sim.InfoEval(get_ID, exposeInd='ind',
-                            output=self.ID_IO)]
+                                output=self.ID_IO),
+                        sim.PyOperator(self.get_pop_inds)]
 
 
     def evolve(self, save_genotypes=True):

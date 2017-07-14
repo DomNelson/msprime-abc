@@ -330,8 +330,10 @@ class TreeBuilder(object):
 
     def __attrs_post_init__(self):
         ## Default population is -1
-        if self.pop_dict is None:
-            self.pop_dict = defaultdict(lambda: 0)
+        if self.pop_dict is not None:
+            self.pop_dict = defaultdict(lambda: -1, self.pop_dict)
+        else:
+            self.pop_dict = defaultdict(lambda: -1)
 
         self.nodes = msprime.NodeTable()
         self.edgesets = msprime.EdgesetTable()
@@ -351,7 +353,7 @@ class TreeBuilder(object):
             if hap.node not in self.haps_idx:
                 is_sample = np.uint32(hap.time == 0)
                 self.nodes.add_row(time=hap.time,
-                                   population=self.pop_dict[hap.node],
+                                   population=self.pop_dict[np.abs(hap.node)],
                                    flags=is_sample)
                 self.haps_idx[hap.node] = i
                 self.idx_haps[i] = hap.node
