@@ -331,7 +331,7 @@ class TreeBuilder(object):
     def __attrs_post_init__(self):
         ## Default population is -1
         if self.pop_dict is None:
-            self.pop_dict = defaultdict(lambda: -1)
+            self.pop_dict = defaultdict(lambda: 0)
 
         self.nodes = msprime.NodeTable()
         self.edgesets = msprime.EdgesetTable()

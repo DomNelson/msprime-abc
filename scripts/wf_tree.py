@@ -11,23 +11,51 @@ import trace_tree
 
 
 @attr.s
-class WFTree(object):
+class InitialPop(object):
     n_inds = attr.ib()
-    n_gens = attr.ib()
     rho = attr.ib()
     L = attr.ib()
-    # n_loci = attr.ib() # Set from msprime initial pop
-    h5_out = attr.ib()
     mu = attr.ib()
-    MAF = attr.ib()
-    trace_trees = attr.ib(default=True)
-    Ne = attr.ib(default=1000)
-    sample_size = attr.ib(default='all')
-    save_genotypes = attr.ib(default=True)
     t_div = attr.ib(default=100)
     mig_prob = attr.ib(default=0)
     grid_width = attr.ib(default=3)
+    Ne = attr.ib(default=1000)
     ploidy = attr.ib(default=2)
+
+
+    def __attrs_post_init__(self):
+        self.pop = self.init_pop()
+
+
+    def init_pop(self):
+        """ Initialized population for forward simulations """
+        ## Create initial population
+        self.msprime_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
+                        rho=self.rho,
+                        L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
+                        mig_prob=self.mig_prob, grid_width=self.grid_width)
+
+        initial_pop = pop_models.msp_to_simuPOP(self.msprime_pop)
+
+        # ## Initialize grid of demes with a single locus
+        # N = np.array([self.n_inds for i in range(self.grid_width**2)])
+        # MAF = np.array([0.2 for i in range(self.grid_width**2)]).reshape(-1, 1)
+        # migmat = pop_models.grid_migration(self.grid_width, 0.1)
+        #
+        # initial_pop = pop_models.maf_init_simuPOP(N, self.rho, self.L, self.mu,
+        #                             MAF, migmat=migmat)
+
+        return initial_pop
+
+
+@attr.s
+class WFTree(object):
+    initial_pop = attr.ib()
+    n_gens = attr.ib()
+    h5_out = attr.ib()
+    trace_trees = attr.ib(default=True)
+    sample_size = attr.ib(default='all')
+    save_genotypes = attr.ib(default=True)
 
 
     def __attrs_post_init__(self):
@@ -41,26 +69,10 @@ class WFTree(object):
         """
         Performs forward simulations with simuPOP, saving genotypes to file
         """
-        ## Create initial population
-        # self.msprime_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
-        #                 rho=self.rho,
-        #                 L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
-        #                 mig_prob=self.mig_prob, grid_width=self.grid_width)
-        #
-        # init_pop = pop_models.msp_to_simuPOP(self.msprime_pop)
-
-        ## Initialize grid of demes with a single locus
-        N = np.array([args.n_inds for i in range(self.grid_width**2)])
-        MAF = np.array([0.2 for i in range(self.grid_width**2)]).reshape(-1, 1)
-        migmat = pop_models.grid_migration(self.grid_width, 0.1)
-
-        init_pop = pop_models.maf_init_simuPOP(N, self.rho, self.L, self.mu,
-                                    MAF, migmat=migmat)
-
-        ##TODO: Implement mutations in forward sims +t1
-        self.FSim = fsim.ForwardSim(self.n_gens, init_pop)
+        self.FSim = fsim.ForwardSim(self.n_gens, self.initial_pop)
         self.FSim.evolve(self.save_genotypes)
 
+        ##TODO: Save directly to hdf5 file +t2
         if self.save_genotypes is True:
             self.FSim.write_haplotypes(self.h5_out)
 
@@ -129,7 +141,17 @@ class WFTree(object):
 
 
 def main(args):
-    W = WFTree(**vars(args))
+    initial_pop = InitialPop(
+            n_inds=args.n_inds,
+            rho=args.rho,
+            L=args.L,
+            mu=args.mu)
+
+    W = WFTree(
+            initial_pop=initial_pop.pop,
+            n_gens=args.n_gens,
+            h5_out=args.h5_out,
+            save_genotypes=args.save_genotypes)
 
     return W
 

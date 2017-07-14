@@ -24,12 +24,6 @@ class ForwardSim(object):
         self.migmat = self.initial_pop.migmat
         self.subpops = []
 
-        ## Create memory buffer to receive file-type output from population
-        ## at each generation
-        self.ID_IO  = io.StringIO()
-        self.recs_IO = io.StringIO()
-        self.muts_IO = io.StringIO()
-
         ## Make sure proper info fields are present to track lineages
         info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe',
                         'migrate_to', 'population']
@@ -41,10 +35,18 @@ class ForwardSim(object):
         assert self.n_loci > 0
         self.L = self.pop.genoSize() / self.pop.ploidy()
 
+        ## Set details of population evolution
         self.set_Ops()
 
 
     def set_Ops(self):
+        ## Create memory buffer to receive file-type output from population
+        ## at each generation
+        self.ID_IO  = io.StringIO()
+        self.recs_IO = io.StringIO()
+        self.muts_IO = io.StringIO()
+
+        ## Set operations to be performed during simuPOP population evolution
         self.set_initOps()
         self.set_preOps()
         self.set_matingScheme()
