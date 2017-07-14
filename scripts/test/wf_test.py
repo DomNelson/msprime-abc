@@ -44,6 +44,22 @@ params = [args] * 1 + [args2] * 1
 
 
 @pytest.fixture(scope='module', params=params)
+def source_pop_init(request):
+    args = request.param
+
+    ## Generate forward simulations which track lineage
+    msp_pop = pop_models.grid_ts(N=args.n_inds*args.ploidy,
+                    rho=args.rho, L=args.L, mu=args.mu, t_div=args.t_div,
+                    Ne=args.Ne, mig_prob=args.mig_prob,
+                    grid_width=args.grid_width)
+
+    init_pop = pop_models.msp_to_simuPOP(msp_pop)
+    FSim_init = fsim.ForwardSim(args.n_gens, init_pop)
+
+    yield {'args': args, 'FSim_init': FSim_init, 'ts_init': msp_pop.ts}
+
+
+@pytest.fixture(scope='module', params=params)
 def source_pops(request):
     args = request.param
 
@@ -57,7 +73,6 @@ def source_pops(request):
 
     ##TODO: Implement mutations in forward sims +t1
     FSim = fsim.ForwardSim(args.n_gens, init_pop)
-    FSim_init = copy.deepcopy(FSim)
     FSim.evolve(save_genotypes=True)
 
     ID = FSim.ID.ravel()
@@ -68,8 +83,7 @@ def source_pops(request):
     ## Write genotypes to file
     FSim.write_haplotypes(args.h5_out)
 
-    yield {'ts_init': msp_pop.ts, 'FSim_init': FSim_init,
-            'haplotypes': simuPOP_haps, 'positions': positions,
+    yield {'haplotypes': simuPOP_haps, 'positions': positions,
            'FSim': FSim, 'args': args, 'ID': ID, 'recs': recs}
 
 
@@ -225,13 +239,13 @@ def test_treesequence(source_pops):
             assert len(g) == 1
 
 
-def test_simuPOP_init(source_pops):
+def test_simuPOP_init(source_pop_init):
     """
     Tests that simuPOP subpopulations are initialized from msprime populations
     properly
     """
-    simuPOP_init = source_pops['FSim_init'].pop
-    ts_init = source_pops['ts_init']
+    simuPOP_init = source_pop_init['FSim_init'].pop
+    ts_init = source_pop_init['ts_init']
 
     sim_pop_freqs = list(pop_models.simuPOP_pop_freqs(simuPOP_init))
     ts_freqs = list(pop_models.msprime_pop_freqs(ts_init))

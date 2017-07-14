@@ -325,9 +325,14 @@ class Population(object):
 class TreeBuilder(object):
     haps = attr.ib(convert=list)
     positions = attr.ib(convert=list)
+    pop_dict = attr.ib(default=None)
 
 
     def __attrs_post_init__(self):
+        ## Default population is -1
+        if self.pop_dict is None:
+            self.pop_dict = defaultdict(lambda: -1)
+
         self.nodes = msprime.NodeTable()
         self.edgesets = msprime.EdgesetTable()
         self.haps_idx = {}
@@ -345,7 +350,8 @@ class TreeBuilder(object):
             ## Store one node per individual, for all segments
             if hap.node not in self.haps_idx:
                 is_sample = np.uint32(hap.time == 0)
-                self.nodes.add_row(time=hap.time, population=0,
+                self.nodes.add_row(time=hap.time,
+                                   population=self.pop_dict[hap.node],
                                    flags=is_sample)
                 self.haps_idx[hap.node] = i
                 self.idx_haps[i] = hap.node

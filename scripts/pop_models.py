@@ -124,7 +124,7 @@ def wf_init(haplotypes, positions, populations=None, ploidy=2):
     """
     ## If no populations are specified, all inds come from pop 0
     if populations is None:
-        populations = np.zeros(len(haplotypes))
+        populations = np.zeros(len(haplotypes)) - 1
 
     ## Make sure populations are sorted
     assert np.min(np.diff(populations)) >= 0
@@ -139,15 +139,15 @@ def wf_init(haplotypes, positions, populations=None, ploidy=2):
 
     ## Set attributes we need to track lineages
     info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe',
-                    'migrate_to', 'initial_pop']
+                    'migrate_to', 'population']
     pop.setInfoFields(info_fields)
     
     ## Set genotypes for each individual separately
     ##TODO: Make sure genotypes and populations match +t2
     for ind, gen, pop_label in zip(pop.individuals(), haplotypes, populations):
         ind.setGenotype(gen)
-        ind.setInfo(pop_label, 'migrate_to')
-        ind.setInfo(pop_label, 'initial_pop')
+        # ind.setInfo(pop_label, 'migrate_to')
+        ind.setInfo(pop_label, 'population')
 
     return pop
 
@@ -165,27 +165,70 @@ def pop_sizes(pops):
     return sizes
 
 
-def maf_init_simuPOP(N, rho, L, mu, n_loci, MAF, ploidy=2):
+def maf_init_simuPOP(N, rho, L, mu, MAF, ploidy=2, migmat=None):
     """
     Returns a simuPOP population for forward simulations by specifying
-    a MAF in the founding generation
+    a MAF in the founding generation.
+    
+    Allele frequencies (MAF) are specified as an array, with a row for each
+    subpopulation and a column for each locus. MAF can also be provided as a
+    float, if a single population with a single is desired
+
+    N should be a vector of sub-population sizes, unless MAF is a float or has
+    a single row, in which case it can be an integer
     """
-    ##TODO: Specify allele frequencies for all loci +t1
-    freqs = [1-MAF, MAF]
+    if type(MAF) is float:
+        MAF = np.array(MAF).reshape(1, 1)
+    else:
+        assert len(MAF.shape) == 2
 
-    ## Draw random loci along the genome and initializes genotypes in the
-    ## specified proportions
+    if type(N) is int:
+        N = np.array(N).reshape(1,)
+
+    ## Make sure proper number of populations have been specified
+    n_pops, n_loci = MAF.shape
+    assert N.shape[0] == n_pops
+    if n_pops > 1:
+        assert len(migmat) == len(migmat[0]) == n_pops, \
+                "Must specify migration matrix for multiple populations"
+
+    ## Draw random loci along the genome 
     positions = np.random.uniform(0, L, size=n_loci)
-    haps_shape = (N * ploidy, n_loci)
-    haps = np.random.choice([0, 1], p=freqs, size=haps_shape)
 
-    ## Convert to lists with types expected by simuPOP
+    ## Draw random genotypes and flatten pops together
+    pops, genotypes = zip(*list(draw_pop_genotypes(N, MAF, ploidy)))
+
+    ## Convert to list with type expected by simuPOP
     positions = list(map(float, positions))
-    haps = [list(map(int, h)) for h in haps]
+    genotypes = [list(map(int, g)) for row in genotypes for g in row]
 
-    simuPOP_pop = wf_init(haps, positions, ploidy)
+    simuPOP_pop = wf_init(genotypes, positions, pops, ploidy)
 
-    return SimuPOPpop(rho=rho, mu=mu, pop=simuPOP_pop)
+    return SimuPOPpop(rho=rho, mu=mu, pop=simuPOP_pop, migmat=migmat)
+
+
+def draw_genotypes(MAF_array, ploidy):
+    """
+    Draws genotypes given an array specifying allele frequencies by
+    population (row) and locus (column), and outputs as a list of lists
+    for initializing a simuPOP population
+    """
+    n_pops, n_hap_loci = MAF_array.shape
+    n_loci = n_hap_loci * ploidy
+    draw = np.random.random(size=(n_pops, n_loci))
+
+    return (draw < MAF_array).astype(int).tolist()
+
+
+def draw_pop_genotypes(N_array, MAF_array, ploidy=2):
+    """
+    Draws genotypes for sub-population sizes specified in N_array, for
+    frequencies specified by population (row) and locus (column) in MAF_array
+    """
+    for pop, n in enumerate(N_array):
+        for i in range(n):
+
+            yield pop, draw_genotypes(MAF_array, ploidy)
 
 
 def simple_pop_ts(N, rho, L, mu, Ne, ploidy=2):

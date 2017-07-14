@@ -42,12 +42,20 @@ class WFTree(object):
         Performs forward simulations with simuPOP, saving genotypes to file
         """
         ## Create initial population
-        self.msp_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
-                        rho=self.rho,
-                        L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
-                        mig_prob=self.mig_prob, grid_width=self.grid_width)
+        # self.msprime_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
+        #                 rho=self.rho,
+        #                 L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
+        #                 mig_prob=self.mig_prob, grid_width=self.grid_width)
+        #
+        # init_pop = pop_models.msp_to_simuPOP(self.msprime_pop)
 
-        init_pop = pop_models.msp_to_simuPOP(self.msp_pop)
+        ## Initialize grid of demes with a single locus
+        N = np.array([args.n_inds for i in range(self.grid_width**2)])
+        MAF = np.array([0.2 for i in range(self.grid_width**2)]).reshape(-1, 1)
+        migmat = pop_models.grid_migration(self.grid_width, 0.1)
+
+        init_pop = pop_models.maf_init_simuPOP(N, self.rho, self.L, self.mu,
+                                    MAF, migmat=migmat)
 
         ##TODO: Implement mutations in forward sims +t1
         self.FSim = fsim.ForwardSim(self.n_gens, init_pop)
@@ -128,7 +136,7 @@ def main(args):
 
 if __name__ == "__main__":
     args = argparse.Namespace(
-            n_inds=100,
+            n_inds=200,
             Ne=100,
             n_gens=10,
             rho=1e-8,

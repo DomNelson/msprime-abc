@@ -22,10 +22,17 @@ class ForwardSim(object):
         self.mu = self.initial_pop.mu
         self.pop = self.initial_pop.pop
         self.migmat = self.initial_pop.migmat
+        self.subpops = []
+
+        ## Create memory buffer to receive file-type output from population
+        ## at each generation
+        self.ID_IO  = io.StringIO()
+        self.recs_IO = io.StringIO()
+        self.muts_IO = io.StringIO()
 
         ## Make sure proper info fields are present to track lineages
         info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe',
-                        'migrate_to', 'initial_pop']
+                        'migrate_to', 'population']
         assert set(info_fields).issubset(self.pop.infoFields())
 
         ##NOTE: Assumes only one chromosome +n1
@@ -34,84 +41,122 @@ class ForwardSim(object):
         assert self.n_loci > 0
         self.L = self.pop.genoSize() / self.pop.ploidy()
 
+        self.set_Ops()
+
+
+    def set_Ops(self):
+        self.set_initOps()
+        self.set_preOps()
+        self.set_matingScheme()
+        self.set_postOps()
+
+
+    def set_initOps(self):
+        """
+        Sets the operators to be executed at beginning of the forward
+        simulation
+        """
+        get_ID = 'str(int(ind.info("ind_id"))) + "\t"'
+
+        self.initOps = [sim.IdTagger(),
+                        sim.InitSex(),
+                        sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
+                        sim.InfoEval(get_ID, exposeInd='ind',
+                                        output=self.ID_IO)]
+
+
+    def set_preOps(self):
+        """
+        Sets the operators to be executed before mating in each generation 
+        """
+        self.preOps = [sim.SNPMutator(u=self.mu, output=self.muts_IO),
+                        sim.PyOperator(self.get_pop_inds)]
+
+        ## Set migrations if more than one sub-population is present
+        if self.pop.numSubPop() > 1:
+            self.preOps.append(sim.Migrator(rate=self.migmat))
+
+
+    def set_matingScheme(self):
+        """ Sets the operators to be executing during mating """
+        ## Convert rho into an intensity along a simulated chromosome of
+        ## length 'n_loci'
+        intensity = self.L * self.rho / self.n_loci
+
+        self.matingScheme = sim.RandomMating(ops=[sim.IdTagger(),
+                     sim.Recombinator(intensity=intensity,
+                                      output=self.recs_IO,
+                                      infoFields='ind_id')]) 
+
+
+    def set_postOps(self):
+        """
+        Sets operators to be executed after mating in each generation
+        """
+        get_ID = 'str(int(ind.info("ind_id"))) + "\t"'
+
+        self.postOps = [sim.InfoEval(get_ID, exposeInd='ind',
+                            output=self.ID_IO)]
+
 
     def evolve(self, save_genotypes=True):
         """
         Traces the lineage of a given number of evenly-spaced loci along a
         single chromosome, in a randomly mating population of size N
         """
+        ## Set whether genotypes are output to file or not
+        if save_genotypes is True:
+            get_genotype = "str(int(ind.info('ind_id'))) + ','" +\
+                            "+ str(ind.genotype()).strip('[]') + '\\n'"
+
+            self.initOps.append(sim.InfoEval(get_genotype, exposeInd='ind',
+                          output='>>' + self.output))
+            self.postOps.append(sim.InfoEval(get_genotype, exposeInd='ind',
+                          output='>>' + self.output))
+
         ## Initialize population, making sure that ind IDs start at 1
         sim.IdTagger().reset(1)
 
-        ## Create memory buffer to receive file-type output from population
-        ## at each generation
-        ID = io.StringIO()
-        recs = io.StringIO()
-        muts = io.StringIO()
+        self.pop.evolve(
+            initOps=self.initOps,
+            preOps=self.preOps,
+            matingScheme=self.matingScheme,
+            postOps=self.postOps,
+            gen=self.n_gens)
 
-        get_ID = 'str(int(ind.info("ind_id"))) + "\t"'
-        get_genotype = "str(int(ind.info('ind_id'))) + ','" +\
-                        "+ str(ind.genotype()).strip('[]') + '\\n'"
-        get_genotype_init = "str(-1 * int(ind.info('ind_id'))) + ','" +\
-                        "+ str(ind.genotype()).strip('[]') + '\\n'"
-
-        ## Convert rho into an intensity along a simulated chromosome of
-        ## length 'n_loci'
-        intensity = self.L * self.rho / self.n_loci
-
-        ## Set whether genotypes are output to file or not
-        if save_genotypes is True:
-            save_genotype_op = [sim.InfoEval(get_genotype, exposeInd='ind',
-                          output='>>' + self.output)]
-        else:
-            save_genotype_op = []
-
-        ## Set migrations if more than one sub-population is present
-        if self.pop.numSubPop() > 1:
-            migrate_op = [sim.Migrator(rate=self.migmat)]
-        else:
-            migrate_op = []
-
-
-        simu = sim.Simulator(self.pop, stealPops=True, rep=1)
-        simu.evolve(
-            initOps=[sim.IdTagger(),
-                sim.InitSex(),
-                sim.InitLineage(mode=sim.FROM_INFO_SIGNED),
-                sim.InfoEval(get_ID, exposeInd='ind', output=ID)] \
-                        + save_genotype_op,
-            preOps=[sim.SNPMutator(u=self.mu, output=muts)] + migrate_op,
-            matingScheme=sim.RandomMating(
-                ops=[sim.IdTagger(),
-                     sim.Recombinator(intensity=intensity,
-                                      output=recs,
-                                      infoFields='ind_id')]
-                     ),
-            postOps=[sim.InfoEval(get_ID, exposeInd='ind', output=ID)] \
-                        + save_genotype_op,
-                gen=self.n_gens
-            )
-
-        self.raw_ID = list_string_to_np(ID.getvalue(), depth=1)
-        self.raw_recs = recs.getvalue()
-        self.muts = store_mutants(muts.getvalue())
-
-        recs.close()
-        ID.close()
-        muts.close()
-
-        ## Set parsed attributes
         self.parse_sim()
-        self.pop = simu.extract(0)
+
+
+    def get_pop_inds(self, pop):
+        """
+        For execution during simuPOP population evolution, returns the IDs of
+        individuals within each subpopulation
+        """
+        for sp in range(pop.numSubPop()):
+            for ind in pop.individuals(sp):
+                self.subpops.extend([ind.ind_id, sp])
+
+        return True
 
 
     def parse_sim(self):
+        raw_ID = list_string_to_np(self.ID_IO.getvalue(), depth=1)
+        raw_recs = self.recs_IO.getvalue()
+        self.muts = store_mutants(self.muts_IO.getvalue())
+
+        self.recs_IO.close()
+        self.ID_IO.close()
+        self.muts_IO.close()
+
+        ## Set parsed attributes
+        self.subpops = np.array(self.subpops).reshape(-1, 2).astype(int)
+
         ## Represent chromosomes as signed individual IDs
-        signed_ID = np.stack([self.raw_ID, self.raw_ID * -1]).T
+        signed_ID = np.stack([raw_ID, raw_ID * -1]).T
         self.ID = parse_output(signed_ID, self.n_gens)
 
         ## Recombinations stay as a list of lists
-        self.recs = sort_recombs(self.raw_recs)
+        self.recs = sort_recombs(raw_recs)
 
 
     def write_haplotypes(self, h5file):
@@ -222,6 +267,7 @@ def parse_mutants(mutant_data):
         a2 = sci_notation_to_int(a2)
         ID = sci_notation_to_int(ID)
         yield gen, loc, ploidy, a1, a2, ID
+
 
 def store_mutants(mutant_data):
     """
