@@ -67,12 +67,14 @@ def msprime_hap_to_simuPOP(ts, ploidy=2):
     return inds.tolist(), pops.astype(float)
 
 
-def msprime_pop_freqs(ts, ploidy=2):
+def msprime_pop_freqs(ts):
     """
     Returns the allele frequency of each locus in a tree sequence, collected
     by population
     """
-    inds, pops = msprime_hap_to_simuPOP(ts)
+    ## Set ploidy to 1 so we pull out individual haplotypes, and loci will
+    ## align properly
+    inds, pops = msprime_hap_to_simuPOP(ts, ploidy=1)
 
     ## Collect inds by population
     pop_inds = defaultdict(list)
@@ -92,12 +94,14 @@ def simuPOP_pop_freqs(pop, loci=True, ploidy=2):
     simuPOP population, defaulting to all loci
     """
     for i in range(pop.numSubPop()):
-        inds = [ind.genotype() for ind in pop.individuals(i)]
+        inds = np.vstack([ind.genotype() for ind in pop.individuals(i)])
+        print(inds.shape, ploidy)
+        inds = inds.reshape(inds.shape[0]*ploidy, int(inds.shape[1]/ploidy))
 
         if loci is True:
-            allele_counts = np.vstack(inds).sum(axis=0)
+            allele_counts = inds.sum(axis=0)
         else:
-            allele_counts = np.vstack(inds)[loci].sum(axis=0)
+            allele_counts = inds[loci].sum(axis=0)
 
         yield i, allele_counts / len(inds)
 
@@ -113,10 +117,10 @@ def msp_to_simuPOP(msp_pop):
     Returns a simuPOP population initialized with the results of the
     msprime coalescent simulation
     """
-    inds, pops = msprime_hap_to_simuPOP(msp_pop.ts)
+    haps, pops = msprime_hap_to_simuPOP(msp_pop.ts)
     positions = msprime_positions(msp_pop.ts)
 
-    simuPOP_pop = wf_init(inds, positions, pops, msp_pop.ploidy)
+    simuPOP_pop = wf_init(haps, positions, pops, msp_pop.ploidy)
 
     return SimuPOPpop(rho=msp_pop.rho, mu=msp_pop.mu, pop=simuPOP_pop,
                         migmat=msp_pop.migmat)
@@ -143,15 +147,12 @@ def wf_init(haplotypes, positions, populations=None, ploidy=2):
 
     ## Set attributes we need to track lineages
     info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe',
-                    'migrate_to', 'population']
+                    'migrate_to']
     pop.setInfoFields(info_fields)
     
     ## Set genotypes for each individual separately
-    ##TODO: Make sure genotypes and populations match +t2
     for ind, gen, pop_label in zip(pop.individuals(), haplotypes, populations):
         ind.setGenotype(gen)
-        # ind.setInfo(pop_label, 'migrate_to')
-        ind.setInfo(pop_label, 'population')
 
     return pop
 

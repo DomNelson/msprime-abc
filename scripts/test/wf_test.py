@@ -246,6 +246,22 @@ def test_simuPOP_init(source_pop_init):
     """
     simuPOP_init = source_pop_init['FSim_init'].pop
     ts_init = source_pop_init['ts_init']
+    args = source_pop_init['args']
+    n_loci = len(list(ts_init.sites()))
+
+    ## Check that proper number of individuals have been created
+    simuPOP_n = np.sum([1 for ind in simuPOP_init.individuals()])
+    ts_n = len(list(ts_init.haplotypes()))
+    assert simuPOP_n == args.n_inds
+    assert ts_n == args.n_inds * args.ploidy
+
+    ## Check that genotypes are proper length, remembering that msprime
+    ## simulates individual haplotypes, and simuPOP concatenates homologous
+    ## chromosomes
+    ts_hap = next(ts_init.haplotypes())
+    sim_ind = next(simuPOP_init.individuals()).genotype()
+    assert len(ts_hap) == n_loci
+    assert len(sim_ind) == n_loci * 2
 
     sim_pop_freqs = list(pop_models.simuPOP_pop_freqs(simuPOP_init))
     ts_freqs = list(pop_models.msprime_pop_freqs(ts_init))
@@ -254,7 +270,8 @@ def test_simuPOP_init(source_pop_init):
 
     for (sim_pop, sim_freq), (ts_pop, ts_freq) in zip(sim_pop_freqs, ts_freqs):
         assert sim_pop == ts_pop
-        assert sim_freq.shape == ts_freq.shape
+        assert ts_freq.shape[0] == n_loci
+        assert sim_freq.shape[0] == n_loci
         assert np.max(sim_freq) > 0
         print(sim_freq[:20], ts_freq[:20])
         assert (sim_freq == ts_freq).all()

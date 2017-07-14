@@ -29,7 +29,7 @@ class ForwardSim(object):
 
         ## Make sure proper info fields are present to track lineages
         info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe',
-                        'migrate_to', 'population']
+                        'migrate_to']
         assert set(info_fields).issubset(self.pop.infoFields())
 
         ##NOTE: Assumes only one chromosome +n1
@@ -171,7 +171,7 @@ class ForwardSim(object):
         """
         self.loci_freqs.append(
                 list(pop_models.simuPOP_pop_freqs(pop, loci=self.track_loci,
-                                        ploidy=self.pop.ploidy)))
+                                        ploidy=self.pop.ploidy())))
 
         return True
 
