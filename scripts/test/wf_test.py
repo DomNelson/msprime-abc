@@ -40,7 +40,7 @@ args2 = argparse.Namespace(
         )
 
 ## Each item in the list will be passed once to the tests
-params = [args] * 1 + [args2] * 1
+params = [args] * 5 + [args2] * 10
 
 
 @pytest.fixture(scope='module', params=params)
@@ -215,6 +215,7 @@ def test_treesequence(source_pops):
     n_loci = source_pops['args'].n_loci
     args = source_pops['args']
     FSim = source_pops['FSim']
+    positions = source_pops['positions']
 
     ## Test conversion to msprime TreeSequence
     P = trace_tree.Population(ID, recs, n_gens, n_loci)
@@ -222,6 +223,10 @@ def test_treesequence(source_pops):
 
     positions = FSim.pop.lociPos()
     T = trace_tree.TreeBuilder(P.haps, positions)
+
+    ## Check that homologous chromosomes are split properly
+    breakpts = [r for rec in recs for r in rec[3:]]
+    assert np.max(breakpts) <= len(positions) - 1
 
     for t in T.ts.trees():
         assert t.num_leaves(t.root) == args.n_inds * 2

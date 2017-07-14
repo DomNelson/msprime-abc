@@ -95,7 +95,6 @@ def simuPOP_pop_freqs(pop, loci=True, ploidy=2):
     """
     for i in range(pop.numSubPop()):
         inds = np.vstack([ind.genotype() for ind in pop.individuals(i)])
-        print(inds.shape, ploidy)
         inds = inds.reshape(inds.shape[0]*ploidy, int(inds.shape[1]/ploidy))
 
         if loci is True:
@@ -212,14 +211,13 @@ def maf_init_simuPOP(N, rho, L, mu, MAF, ploidy=2, migmat=None):
     return SimuPOPpop(rho=rho, mu=mu, pop=simuPOP_pop, migmat=migmat)
 
 
-def draw_genotypes(MAF_array, ploidy):
+def draw_genotypes(MAF_array):
     """
     Draws genotypes given an array specifying allele frequencies by
     population (row) and locus (column), and outputs as a list of lists
     for initializing a simuPOP population
     """
-    n_pops, n_hap_loci = MAF_array.shape
-    n_loci = n_hap_loci * ploidy
+    n_pops, n_loci = MAF_array.shape
     draw = np.random.random(size=(n_pops, n_loci))
 
     return (draw < MAF_array).astype(int).tolist()
@@ -233,7 +231,7 @@ def draw_pop_genotypes(N_array, MAF_array, ploidy=2):
     for pop, n in enumerate(N_array):
         for i in range(n):
 
-            yield pop, draw_genotypes(MAF_array, ploidy)
+            yield pop, draw_genotypes(MAF_array)
 
 
 def simple_pop_ts(N, rho, L, mu, Ne, ploidy=2):

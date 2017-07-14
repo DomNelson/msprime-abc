@@ -30,20 +30,20 @@ class InitialPop(object):
     def init_pop(self):
         """ Initialized population for forward simulations """
         # Create initial population
-        self.msprime_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
-                        rho=self.rho,
-                        L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
-                        mig_prob=self.mig_prob, grid_width=self.grid_width)
-
-        initial_pop = pop_models.msp_to_simuPOP(self.msprime_pop)
-
-        ## Initialize grid of demes with a single locus
-        # N = np.array([self.n_inds for i in range(self.grid_width**2)])
-        # MAF = np.array([0.2 for i in range(self.grid_width**2)]).reshape(-1, 1)
-        # migmat = pop_models.grid_migration(self.grid_width, 0.1)
+        # self.msprime_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
+        #                 rho=self.rho,
+        #                 L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
+        #                 mig_prob=self.mig_prob, grid_width=self.grid_width)
         #
-        # initial_pop = pop_models.maf_init_simuPOP(N, self.rho, self.L, self.mu,
-        #                             MAF, migmat=migmat)
+        # initial_pop = pop_models.msp_to_simuPOP(self.msprime_pop)
+
+        # Initialize grid of demes with a single locus
+        N = np.array([self.n_inds for i in range(self.grid_width**2)])
+        MAF = np.array([[0.2, 0.5] for i in range(self.grid_width**2)]).reshape(-1, 2)
+        migmat = pop_models.grid_migration(self.grid_width, self.mig_prob)
+
+        initial_pop = pop_models.maf_init_simuPOP(N, self.rho, self.L, self.mu,
+                                    MAF, migmat=migmat)
 
         return initial_pop
 
@@ -151,6 +151,7 @@ def main(args):
             n_inds=args.n_inds,
             rho=args.rho,
             L=args.L,
+            mig_prob=args.mig_prob,
             mu=args.mu)
 
     W = WFTree(
