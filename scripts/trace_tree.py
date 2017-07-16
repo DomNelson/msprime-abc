@@ -191,6 +191,9 @@ class Population(object):
         self.founders = set(self.ID[:self.n_inds])
         self.uncoalesced_haps = []
 
+        ## Node used to coalesce lineages remaining after wf simulation
+        self.great_anc_node = 0
+
 
     def init_haps(self):
         """
@@ -258,9 +261,10 @@ class Population(object):
 
             if new_node in self.founders:
                 ## Store founders as an inactive node
-                self.haps.add(Haplotype(new_node, hap.left, hap.right,
-                              hap.children, hap.time, active=False))
-                self.uncoalesced_haps.append(hap)
+                founder_hap = Haplotype(new_node, hap.left, hap.right,
+                              hap.children, hap.time, active=False)
+                self.haps.add(founder_hap)
+                self.uncoalesced_haps.append(founder_hap)
                 self.haps.discard(hap)
                 continue
 
@@ -313,9 +317,8 @@ class Population(object):
         if self.coalesce_all is True:
             print("Coalescing all remaining haps")
             ## If set, coalesce all remaining haplotypes in a new node
-            great_anc_node = 0
             for hap in self.uncoalesced_haps:
-                self.haps.add(hap.climb(great_anc_node))
+                self.haps.add(hap.climb(self.great_anc_node))
                 self.haps.discard(hap)
 
             self.coalesce()
@@ -335,6 +338,9 @@ class TreeBuilder(object):
         else:
             self.pop_dict = defaultdict(lambda: -1)
 
+        ## Node used to coalesce lineages remaining after wf simulation
+        self.great_anc_node = 0
+
         self.nodes = msprime.NodeTable()
         self.edgesets = msprime.EdgesetTable()
         self.haps_idx = {}
@@ -352,9 +358,15 @@ class TreeBuilder(object):
             ## Store one node per individual, for all segments
             if hap.node not in self.haps_idx:
                 is_sample = np.uint32(hap.time == 0)
+
+                if hap.node == self.great_anc_node:
+                    name = 'great_anc_node'
+                else:
+                    name = ''
+
                 self.nodes.add_row(time=hap.time,
                                    population=self.pop_dict[np.abs(hap.node)],
-                                   flags=is_sample)
+                                   flags=is_sample, name=name)
                 self.haps_idx[hap.node] = i
                 self.idx_haps[i] = hap.node
                 i += 1

@@ -152,6 +152,7 @@ def wf_init(haplotypes, positions, populations=None, ploidy=2):
     ## Set genotypes for each individual separately
     for ind, gen, pop_label in zip(pop.individuals(), haplotypes, populations):
         ind.setGenotype(gen)
+        ind.migrate_to = pop_label
 
     return pop
 
