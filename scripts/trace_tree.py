@@ -328,6 +328,7 @@ class Population(object):
 class TreeBuilder(object):
     haps = attr.ib(convert=list)
     positions = attr.ib(convert=list)
+    L = attr.ib(convert=float)
     pop_dict = attr.ib(default=None)
 
 
@@ -372,6 +373,26 @@ class TreeBuilder(object):
                 i += 1
 
 
+    def segment_boundaries(self, hap):
+        """
+        If we have traced though a simuPOP population, only discrete loci
+        are tracked. The first and last loci therefore effectively extend
+        to either end of the chromosome. Otherwise the boundaries are
+        determined by the positions of the loci contained in the segment
+        """
+        if hap.left == 0:
+            left = 0
+        else:
+            left = self.positions[hap.left]
+
+        if hap.right == len(self.positions):
+            right = self.L
+        else:
+            right = self.positions[hap.right]
+
+        return left, right
+
+
     def hap_array(self):
         """
         Returns haplotype data in a structured array to facilitate contructing
@@ -385,9 +406,9 @@ class TreeBuilder(object):
             if hap.time > 0 and len(children) > 1:
                 assert hap.active is False
                 assert self.nodes.flags[self.haps_idx[hap.node]] == 0
+                left, right = self.segment_boundaries(hap)
 
-                edge_records.append((hap.left, hap.right,
-                                    self.haps_idx[hap.node],
+                edge_records.append((left, right, self.haps_idx[hap.node],
                                     hap.time, children, len(children)))
 
         ## Store edgesets data in structured array to simplify sorting
