@@ -21,9 +21,9 @@ def collect_lineages(haps, haps_idx_dict):
 
 
 args = argparse.Namespace(
-        n_inds=20,
+        n_inds=10,
         Ne=100,
-        n_gens=5,
+        n_gens=50,
         rho=1e-8,
         mu=1e-10,
         L=1e7,
@@ -41,9 +41,23 @@ ts_top = W.ts
 W, initial_pop = wf_tree.main(args)
 ts_bottom = W.ts
 
-CS = ts_combine.TSCombine(ts_bottom, ts_top, 10)
+CS = ts_combine.TSCombine(ts_bottom, ts_top, args.n_gens)
 # CS.align()
 cs = CS.combine()
+
+lineages = collect_lineages(W.P.uncoalesced_haps, W.T.haps_idx)
+
+s = next(cs.trees())
+s.draw(os.path.expanduser('~/temp/msprime/combine.svg'), width=500,
+        height=500, show_times=True)
+next(ts_top.trees()).draw(os.path.expanduser('~/temp/msprime/top.svg'),
+        width=500, height=500, show_times=True)
+next(ts_bottom.trees()).draw(os.path.expanduser('~/temp/msprime/bottom.svg'),
+        width=500, height=500, show_times=True)
+
+from IPython import embed
+embed()
+
 
 # bottom_roots = [i for i, n in enumerate(ts_bottom.nodes())
 #                         if n.time == args.n_gens]
