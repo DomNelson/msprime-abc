@@ -12,8 +12,10 @@ args = argparse.Namespace(
         n_gens=10,
         rho=1e-8,
         L=1e8,
+        mu=1e-8,
         n_loci=100,
-        h5_out='gen.h5'
+        h5_out='gen.h5',
+        MAF=0.1
         )
 
 args2 = argparse.Namespace(
@@ -21,29 +23,25 @@ args2 = argparse.Namespace(
         n_gens=30,
         rho=1e-8,
         L=1e8,
+        mu=1e-8,
         n_loci=20,
-        h5_out='gen.h5'
+        h5_out='gen.h5',
+        MAF=0.1
         )
 
 ## Each item in the list will be passed once to the tests
-params = [args] * 5+ [args2] * 20
+params = [args] * 1 + [args2] * 10
 
 
 @pytest.fixture(scope='module', params=params)
 def source_pops(request):
     args = request.param
-    # ts = fsim.generate_source_pops(args)
-    #
-    # simuPOP_haps = fsim.msprime_hap_to_simuPOP(ts)
-    # positions = fsim.msprime_positions(ts)
-    # pop = fsim.wf_init(simuPOP_haps, positions)
 
-    ## Generate forward simulations which track lineage
-    FSim = fsim.ForwardSim(args.n_inds,
-                           args.L,
-                           args.n_gens,
-                           args.n_loci,
-                           args.rho)
+    init_pop = fsim.MAFPop(args.n_inds, args.rho, args.L, args.mu,
+                        args.n_loci, args.MAF)
+
+    FSim = fsim.ForwardSim(args.n_gens, init_pop.pop)
+    FSim.evolve()
 
     FSim.evolve()
 
