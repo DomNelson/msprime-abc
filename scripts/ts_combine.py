@@ -1,20 +1,7 @@
 import itertools
 import numpy as np
 import attr
-from collections import defaultdict
 import msprime
-
-
-def get_parent_edgeset(edgesets, nodes):
-    """
-    Returns edgesets which are parental to the nodes provided
-    """
-    nodes = set(nodes)
-    for i, e in enumerate(edgesets):
-        children = nodes.intersection(e.children)
-        if len(children) > 0:
-            for child in children:
-                yield child, i
 
 
 def shift_connecting_edge_array(connecting_edge_array, node_shift):
@@ -50,6 +37,38 @@ def combine_nodes(top_nodes, bottom_nodes):
         nodes_table.add_row(**vars(node))
         
     return nodes_table
+
+
+def shuffle_leaves(ts):
+    """
+    Returns shuffled samples top tree, so they can be
+    connected randomly to the bottom tree sequence
+    """
+    leaves = ts.samples()
+    np.random.shuffle(leaves)
+
+    return leaves
+
+
+def connecting_edge_array(ts_top, ts_bottom, great_anc):
+    """
+    Returns edgesets connecting the two trees, where connections to
+    great_anc are cut in ts_bottom, and attached to random nodes
+    in ts_top
+    """
+    dtypes = [('left', np.float), ('right', np.float),
+        ('parent', np.int32), ('children', tuple)]
+
+    leaves = shuffle_leaves(ts_top)
+    uncoal = list(get_uncoalesced(ts_bottom, great_anc))
+    
+    ## Store edge attributes in structured array
+    edge_array = np.zeros(len(uncoal), dtype=dtypes)
+
+    for i, (leaf, (children, interval)) in enumerate(zip(leaves, uncoal)):
+        edge_array[i] = (interval[0], interval[1], leaf, children)
+
+    return edge_array
 
 
 def edge_array_to_table_records(edge_array):
@@ -128,20 +147,8 @@ class TSCombine(object):
         self.great_anc = [i for i, n in enumerate(self.ts_bottom.nodes())
                                 if n.name == 'great_anc_node'][0]
 
-        ## If time between tree sequences is not specified, default to
-        ## the difference between top leaves and children of bottom root
-        ##TODO: Implement +t2
         if self.time_shift is None:
             self.time_shift = self.get_shift()
-
-        ## Track which nodes have been connected so the same individual
-        ## is always assigned the same new node. If node hasn't been
-        ## connected yet, draws a random leaf
-        shuffled_leaves = self.ts_top.samples()
-        np.random.shuffle(shuffled_leaves)
-        shuffled_leaves = iter(shuffled_leaves)
-        random_leaf = lambda: next(shuffled_leaves)
-        self.connection_dict = defaultdict(random_leaf)
             
 
     def get_shift(self):
@@ -153,7 +160,7 @@ class TSCombine(object):
         bottom_times = [self.bottom_nodes[n].time for n in self.match_bottom]
 
         top_time = top_times[0]
-        bottom_time = np.max(bottom_times)
+        bottom_time = bottom_times[0]
         time_shift = bottom_time - top_time
         
         return time_shift
@@ -191,68 +198,32 @@ class TSCombine(object):
             self.top_nodes[n_ix].flags = 0
 
 
-    def get_connections(self):
-        """
-        Returns edgesets connecting the two trees, where connections to
-        great_anc are cut in ts_bottom, and attached to random nodes
-        in ts_top
-        """
-        uncoal = list(get_uncoalesced(self.ts_bottom, self.great_anc))
-        
-        new_child_dict = defaultdict(set)
-
-        for i, (children, interval) in enumerate(uncoal):
-            for child in children:
-                leaf = self.connection_dict[child]
-                new_child_dict[leaf].add(child)
-
-        return dict(new_child_dict)
-
-
-    def make_connections(self, new_child_dict, node_shift):
-        shifted_nodes = [n + node_shift for n in new_child_dict.keys()]
-        leaf_parents = get_parent_edgeset(self.top_edgesets, shifted_nodes)
-        parent_dict = dict(leaf_parents)
-
-        for leaf, children in new_child_dict.items():
-            assert len(children) == 1
-            shifted_leaf = leaf + node_shift
-            edge_index = parent_dict[shifted_leaf]
-            edgeset = self.top_edgesets[edge_index]
-
-            print(children)
-            print("Connecting to", edgeset)
-            new_children = list(self.top_edgesets[edge_index].children)
-            new_children = tuple(sorted(new_children + list(children)))
-
-            self.top_edgesets[edge_index].children = new_children
-
-
     def combine(self):
         """
         Returns a tree sequence formed by overlapping the specified nodes
         """
-        ## Align node indices to match new combined list
-        node_shift = len(self.bottom_nodes)
-        self.shift_top_node_times()
-        self.shift_top_edgesets()
-
-        ## Connect uncoalesced lineages from the bottom tree to parents of
-        ## leaves in the top tree
-        new_child_dict = self.get_connections()
-        self.make_connections(new_child_dict, node_shift)
+        ## Get edges leading to root of the bottom tree, which will be
+        ## attached to the leaves of the top tree
+        ca = connecting_edge_array(self.ts_top, self.ts_bottom, self.great_anc)
 
         ## Remove sample status from top leaves which connect to bottom tree
         ## sequence 
-        self.update_samples(new_child_dict.keys())
+        self.update_samples(ca['parent'])
 
-        ## Combine nodes from each tree sequence
-        nodes_table = combine_nodes(self.top_nodes, self.bottom_nodes)
+        ## Align node indices to match new combined list
+        node_shift = len(self.bottom_nodes)
+        ca = shift_connecting_edge_array(ca, node_shift)
+        ce = edge_array_to_table_records(ca)
+        self.shift_top_node_times()
+        self.shift_top_edgesets()
 
         ## Combine bottom, connecting, and top edgesets into a table
         te = edgesets_to_edge_records(self.top_edgesets)
         be = edgesets_to_edge_records(self.bottom_edgesets)
-        edgesets_table = edgesets_table_from_records(be, te)
+        edgesets_table = edgesets_table_from_records(be, ce, te)
+
+        ## Combine nodes from each tree sequence
+        nodes_table = combine_nodes(self.top_nodes, self.bottom_nodes)
 
         combined_ts = msprime.load_tables(nodes=nodes_table,
                                           edgesets=edgesets_table)
