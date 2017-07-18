@@ -3,7 +3,9 @@ import numpy as np
 import pytest
 sys.path.append(os.path.abspath('../'))
 import argparse
+import copy
 import trace_tree
+import pop_models
 import forward_sim as fsim
 
 
@@ -12,10 +14,15 @@ args = argparse.Namespace(
         n_gens=10,
         rho=1e-8,
         L=1e8,
-        mu=1e-8,
+        mu=1e-9,
         n_loci=100,
         h5_out='gen.h5',
-        MAF=0.1
+        output='genotypes.txt',
+        ploidy=2,
+        t_div=100,
+        grid_width=2,
+        mig_prob=0.1,
+        Ne=1000
         )
 
 args2 = argparse.Namespace(
@@ -23,66 +30,94 @@ args2 = argparse.Namespace(
         n_gens=30,
         rho=1e-8,
         L=1e8,
-        mu=1e-8,
+        mu=1e-9,
         n_loci=20,
         h5_out='gen.h5',
-        MAF=0.1
+        output='genotypes.txt',
+        ploidy=2,
+        t_div=100,
+        grid_width=1,
+        mig_prob=0.1,
+        Ne=1000
         )
 
 ## Each item in the list will be passed once to the tests
-params = [args] * 1 + [args2] * 10
+params = [args] * 5 + [args2] * 10
+
+
+@pytest.fixture(scope='module', params=params)
+def source_pop_init(request):
+    args = request.param
+
+    ## Generate forward simulations which track lineage
+    msp_pop = pop_models.grid_ts(N=args.n_inds*args.ploidy,
+                    rho=args.rho, L=args.L, mu=args.mu, t_div=args.t_div,
+                    Ne=args.Ne, mig_prob=args.mig_prob,
+                    grid_width=args.grid_width)
+
+    init_pop = pop_models.msp_to_simuPOP(msp_pop)
+    FSim_init = fsim.ForwardSim(args.n_gens, init_pop, output=args.output)
+
+    yield {'args': args, 'FSim_init': FSim_init, 'ts_init': msp_pop.ts}
 
 
 @pytest.fixture(scope='module', params=params)
 def source_pops(request):
     args = request.param
 
-    init_pop = fsim.MAFPop(args.n_inds, args.rho, args.L, args.mu,
-                        args.n_loci, args.MAF)
+    ## Generate forward simulations which track lineage
+    msp_pop = pop_models.grid_ts(N=args.n_inds*args.ploidy,
+                    rho=args.rho, L=args.L, mu=args.mu, t_div=args.t_div,
+                    Ne=args.Ne, mig_prob=args.mig_prob,
+                    grid_width=args.grid_width)
 
-    FSim = fsim.ForwardSim(args.n_gens, init_pop.pop)
-    FSim.evolve()
+    init_pop = pop_models.msp_to_simuPOP(msp_pop)
 
+    ##TODO: Implement mutations in forward sims +t1
+    FSim = fsim.ForwardSim(args.n_gens, init_pop, output=args.output)
     FSim.evolve()
 
     ID = FSim.ID.ravel()
     recs = FSim.recs
+    simuPOP_haps, pops = pop_models.msprime_hap_to_simuPOP(msp_pop.ts)
+    positions = pop_models.msprime_positions(msp_pop.ts)
 
     ## Write genotypes to file
     FSim.write_haplotypes(args.h5_out)
 
-    yield {#'TreeSequence': ts, 'haplotypes': simuPOP_haps,
-           #'positions': positions,
+    yield {'haplotypes': simuPOP_haps, 'positions': positions,
            'FSim': FSim, 'args': args, 'ID': ID, 'recs': recs}
 
 
-# def test_simuPOP(source_pops):
-#     args = source_pops['args']
-#     pop = source_pops['simuPOP_pop']
-#     haplotypes = source_pops['haplotypes']
-#     positions = source_pops['positions']
-#
-#     ## Make sure we've simulated a diploid population
-#     assert len(haplotypes) == 2 * args.n_inds
-#
-#     ## Integer positions are suspicious, ie. not randomly generated
-#     for pos in positions:
-#         assert int(pos) != pos
-#
-#     ##TODO Sanity check for recombination rate +t1
-#
-#     ## Make sure haplotypes and positions align
-#     n_sites = len(positions)
-#     for hap in haplotypes:
-#         assert len(hap) == n_sites
-#
-#     ## Make sure simuPOP population has proper haplotypes and positions
-#     for ind in pop.individuals():
-#         assert len(ind.genotype()) == 2 * n_sites
-#         assert np.array_equal(np.array(pop.lociPos()), positions)
-#
-#         ## Make sure we don't have any new mutations
-#         assert set(ind.genotype()) == set([0, 1])
+def test_simuPOP(source_pops):
+    args = source_pops['args']
+    pop = source_pops['FSim'].pop
+    haplotypes = source_pops['haplotypes']
+    positions = source_pops['positions']
+
+    ## Make sure we've simulated the right number of individuals, remembering
+    ## that homologous chromosomes are concatenated together
+    assert len(haplotypes) == args.n_inds
+
+    ## Integer positions are suspicious, ie. not randomly generated
+    for pos in positions:
+        assert int(pos) != pos
+
+    ##TODO Sanity check for recombination rate +t1
+
+    ## Make sure haplotypes and positions align
+    n_sites = len(positions)
+    for hap in haplotypes:
+        ## Each haplotype contains 'ploidy' concatenated chromosomes
+        assert len(hap) == args.ploidy * n_sites
+
+    ## Make sure simuPOP population has proper haplotypes and positions
+    for ind in pop.individuals():
+        assert len(ind.genotype()) == 2 * n_sites
+        assert np.array_equal(np.array(pop.lociPos()), positions)
+
+        ## Make sure we don't have any new mutations
+        assert set(ind.genotype()) == set([0, 1])
 
 
 def test_haps():
@@ -182,6 +217,7 @@ def test_treesequence(source_pops):
     n_loci = source_pops['args'].n_loci
     args = source_pops['args']
     FSim = source_pops['FSim']
+    positions = source_pops['positions']
 
     ## Test conversion to msprime TreeSequence
     P = trace_tree.Population(ID, recs, n_gens, n_loci)
@@ -189,6 +225,10 @@ def test_treesequence(source_pops):
 
     positions = FSim.pop.lociPos()
     T = trace_tree.TreeBuilder(P.haps, positions)
+
+    ## Check that homologous chromosomes are split properly
+    breakpts = [r for rec in recs for r in rec[3:]]
+    assert np.max(breakpts) <= len(positions) - 1
 
     for t in T.ts.trees():
         assert t.num_leaves(t.root) == args.n_inds * 2
@@ -204,4 +244,46 @@ def test_treesequence(source_pops):
 
             ## All nodes should share a single genotype along the tree
             assert len(g) == 1
+
+
+def test_simuPOP_init(source_pop_init):
+    """
+    Tests that simuPOP subpopulations are initialized from msprime populations
+    properly
+    """
+    simuPOP_init = source_pop_init['FSim_init'].pop
+    ts_init = source_pop_init['ts_init']
+    args = source_pop_init['args']
+    n_loci = len(list(ts_init.sites()))
+
+    ## Check that proper number of individuals have been created
+    simuPOP_n = np.sum([1 for ind in simuPOP_init.individuals()])
+    ts_n = len(list(ts_init.haplotypes()))
+    assert simuPOP_n == args.n_inds
+    assert ts_n == args.n_inds * args.ploidy
+
+    ## Check that genotypes are proper length, remembering that msprime
+    ## simulates individual haplotypes, and simuPOP concatenates homologous
+    ## chromosomes
+    ts_hap = next(ts_init.haplotypes())
+    sim_ind = next(simuPOP_init.individuals()).genotype()
+    assert len(ts_hap) == n_loci
+    assert len(sim_ind) == n_loci * 2
+
+    sim_pop_freqs = list(pop_models.simuPOP_pop_freqs(simuPOP_init))
+    ts_freqs = list(pop_models.msprime_pop_freqs(ts_init))
+
+    assert len(sim_pop_freqs) == len(ts_freqs)
+
+    for (sim_pop, sim_freq), (ts_pop, ts_freq) in zip(sim_pop_freqs, ts_freqs):
+        assert sim_pop == ts_pop
+        assert ts_freq.shape[0] == n_loci
+        assert sim_freq.shape[0] == n_loci
+        assert np.max(sim_freq) > 0
+        print(sim_freq[:20], ts_freq[:20])
+        assert (sim_freq == ts_freq).all()
+
+
+
+
 

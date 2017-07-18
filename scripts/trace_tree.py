@@ -5,6 +5,8 @@ import msprime
 from profilehooks import timecall
 import attr
 from collections import defaultdict
+import _msprime
+from _msprime import MutationGenerator, RandomGenerator
 
 
 def get_chrom(idx, start_chrom, breakpoints):
@@ -175,6 +177,7 @@ class Population(object):
     n_gens = attr.ib()
     n_loci = attr.ib()
     coalesce_all = attr.ib(default=True)
+    sample_size = attr.ib(default='all')
 
 
     def __attrs_post_init__(self):
@@ -188,6 +191,9 @@ class Population(object):
         self.founders = set(self.ID[:self.n_inds])
         self.uncoalesced_haps = []
 
+        ## Node used to coalesce lineages remaining after wf simulation
+        self.great_anc_node = 0
+
 
     def init_haps(self):
         """
@@ -198,6 +204,9 @@ class Population(object):
 
         ##NOTE Assumes constant generation size +n1
         nodes = self.ID[-self.n_inds:]
+        if self.sample_size != 'all':
+            nodes = np.random.choice(nodes, size=self.sample_size)
+
         left = 0
         right = self.n_loci
         time = 0
@@ -252,9 +261,10 @@ class Population(object):
 
             if new_node in self.founders:
                 ## Store founders as an inactive node
-                self.haps.add(Haplotype(new_node, hap.left, hap.right,
-                              hap.children, hap.time, active=False))
-                self.uncoalesced_haps.append(hap)
+                founder_hap = Haplotype(new_node, hap.left, hap.right,
+                              hap.children, hap.time, active=False)
+                self.haps.add(founder_hap)
+                self.uncoalesced_haps.append(founder_hap)
                 self.haps.discard(hap)
                 continue
 
@@ -307,9 +317,8 @@ class Population(object):
         if self.coalesce_all is True:
             print("Coalescing all remaining haps")
             ## If set, coalesce all remaining haplotypes in a new node
-            great_anc_node = 0
             for hap in self.uncoalesced_haps:
-                self.haps.add(hap.climb(great_anc_node))
+                self.haps.add(hap.climb(self.great_anc_node))
                 self.haps.discard(hap)
 
             self.coalesce()
@@ -319,9 +328,19 @@ class Population(object):
 class TreeBuilder(object):
     haps = attr.ib(convert=list)
     positions = attr.ib(convert=list)
+    pop_dict = attr.ib(default=None)
 
 
     def __attrs_post_init__(self):
+        ## Default population is -1
+        if self.pop_dict is not None:
+            self.pop_dict = defaultdict(lambda: -1, self.pop_dict)
+        else:
+            self.pop_dict = defaultdict(lambda: -1)
+
+        ## Node used to coalesce lineages remaining after wf simulation
+        self.great_anc_node = 0
+
         self.nodes = msprime.NodeTable()
         self.edgesets = msprime.EdgesetTable()
         self.haps_idx = {}
@@ -339,8 +358,15 @@ class TreeBuilder(object):
             ## Store one node per individual, for all segments
             if hap.node not in self.haps_idx:
                 is_sample = np.uint32(hap.time == 0)
-                self.nodes.add_row(time=hap.time, population=0,
-                                   flags=is_sample)
+
+                if hap.node == self.great_anc_node:
+                    name = 'great_anc_node'
+                else:
+                    name = ''
+
+                self.nodes.add_row(time=hap.time,
+                                   population=self.pop_dict[np.abs(hap.node)],
+                                   flags=is_sample, name=name)
                 self.haps_idx[hap.node] = i
                 self.idx_haps[i] = hap.node
                 i += 1
@@ -450,3 +476,33 @@ class TreeBuilder(object):
                 assert f.root.inds[file_idx] == uID
 
         return genotypes
+
+
+def mutate_ts(ts, mu, seed=None):
+    """
+    Throws down mutations at rate mu on the provided tree sequence
+    """
+    if seed is None:
+        seed = np.random.randint(1, 2**32)
+
+    rng = RandomGenerator(seed)
+    m = MutationGenerator(rng, mu)
+
+    ##TODO: May be a cleaner way of handling these tables +t3
+    ts_tables = ts.dump_tables()
+    node_table = ts_tables.nodes
+    edgeset_table = ts_tables.edgesets
+    migrations_table = ts_tables.migrations
+    mutation_table = ts_tables.mutations
+    mutation_type_table = ts_tables.sites
+
+    ## Generate mutations on the tree sequence
+    m.generate(node_table, edgeset_table, mutation_type_table,
+                mutation_table)
+
+    ## Create new tree sequence containing the mutations
+    ts = ts.load_tables(nodes=node_table, edgesets=edgeset_table,
+                    mutations=mutation_table, sites=mutation_type_table,
+                    migrations=migrations_table)
+
+    return ts
