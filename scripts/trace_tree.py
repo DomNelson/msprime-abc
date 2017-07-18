@@ -94,7 +94,7 @@ def coalesce_haps(common_anc_haps):
                 yield Haplotype(node, left, right, [node], time, True)
 
 
-def recombine_haps(haps, rec_dict):
+def recombine_haps(haps, rec_vec):
     """
     Climbs haplotypes to the appropriate parent node, splitting them
     if recombination occurred
@@ -105,14 +105,13 @@ def recombine_haps(haps, rec_dict):
     new_haps = []
     old_haps = []
     for hap in haps:
-        node = hap.node
         ## Format is [Offspring, Parent, StartChrom, rec1, rec2, ...]
-        recs = rec_dict[node][3:]
+        recs = rec_vec[3:]
 
         ## Only split if both sides of breakpoint are in Haplotype. Note that
         ## hap.right is not included in the haplotype, and splits are 
         ## defined as happening after the recombination index
-        recs = np.array([r for r in recs if hap.left <= r < hap.right-1])
+        recs = np.array([r for r in recs[3:] if hap.left <= r < hap.right-1])
         num_recs += len(recs)
         assert len(recs) == len(set(recs))
 
@@ -172,53 +171,36 @@ class Population(object):
     A population of haplotypes, with methods for retracing coalescent trees
     through a lineage constructed by forward simulations
     """
-    ID = attr.ib()
-    recs = attr.ib()
-    n_gens = attr.ib()
-    n_loci = attr.ib()
     coalesce_all = attr.ib(default=True)
     sample_size = attr.ib(default='all')
 
 
     def __attrs_post_init__(self):
-        self.haps = self.init_haps()
-
-        ## Make dict associating IDs with recs, ignoring the founding
-        ## generation
-        ##NOTE Assumes constant generation size +n1
-        assert len(self.ID) == len(self.recs) + self.n_inds
-        self.rec_dict = dict(zip(self.ID[self.n_inds:], self.recs))
-        self.founders = set(self.ID[:self.n_inds])
         self.uncoalesced_haps = []
 
         ## Node used to coalesce lineages remaining after wf simulation
         self.great_anc_node = 0
 
 
-    def init_haps(self):
+    def init_haps(self, node_IDs, L):
         """
         Initializes haplotypes according to ID labels, in last generation,
         with loci numbered sequentially
         """
-        self.n_inds = int(self.ID.shape[0] / (self.n_gens+1))
-
-        ##NOTE Assumes constant generation size +n1
-        nodes = self.ID[-self.n_inds:]
         if self.sample_size != 'all':
-            nodes = np.random.choice(nodes, size=self.sample_size)
+            nodes = np.random.choice(node_IDs, size=self.sample_size)
 
         left = 0
-        right = self.n_loci
+        right = L
         time = 0
 
         ## Initialize sample nodes, which do not climb
-        haps = set([Haplotype(n, left, right, [n], time, active=False)
-                    for n in nodes])
+        self.haps = set([Haplotype(n, left, right, [n], time, active=False)
+                    for n in node_IDs])
 
         ## Initialize haplotypes to climb from samples
-        haps.update(set([Haplotype(n, left, right, [n], time) for n in nodes]))
-
-        return haps
+        self.haps.update(set([Haplotype(n, left, right, [n], time)
+                    for n in node_IDs]))
 
 
     def active_haps(self):
@@ -246,11 +228,10 @@ class Population(object):
                           np.array(self.recs).reshape(-1, 1)])
 
 
-    def climb(self):
+    def climb(self, rec_vecs):
         """ Climb all haplotypes to their parent node """
-        for hap in self.active_haps():
-            recs = self.rec_dict[hap.node]
-            offspring, parent, start_chrom, *breakpoints = recs
+        for hap, rec_vec in zip(self.active_haps(), rec_vecs):
+            offspring, parent, start_chrom, *breakpoints = rec_vec
             assert offspring == np.abs(hap.node)
 
             ## Find which parental chromosome the haplotype inherits from,
@@ -290,12 +271,12 @@ class Population(object):
         self.haps.update(new_haps)
 
 
-    def recombine(self):
+    def recombine(self, rec_vec):
         """
         Returns new haplotypes which have been created through recombination
         """
         haps = self.active_haps()
-        old_haps, new_haps = recombine_haps(haps, self.rec_dict)
+        old_haps, new_haps = recombine_haps(haps, rec_vec)
 
         for h in old_haps:
             assert h in self.haps

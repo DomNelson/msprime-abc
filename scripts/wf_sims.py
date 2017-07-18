@@ -1,6 +1,7 @@
 import simuOpt
 simuOpt.setOptions(alleleType='lineage', quiet=True)
 import tables
+from itertools import islice
 import attr
 import io
 import msprime
@@ -9,6 +10,51 @@ import numpy as np
 import sys, os
 
 import pop_models
+import trace_tree
+
+
+def ID_increment(start=1):
+    i = start
+    while True:
+        yield i
+        i += 1
+
+
+@attr.s
+class BackwardSim(object):
+    L = attr.ib()
+    n_inds = attr.ib()
+
+
+    def __attrs_post_init__(self):
+        self.IDs = ID_increment(1)
+        self.P = trace_tree.Population()
+
+
+    def next_inds(self, n):
+        """ Returns the next n ind IDs in sequence """
+        return list(islice(self.IDs, 0, n))
+        
+
+    def init_pop(self):
+        """ Initializes haplotypes in the population """
+        init_IDs = self.next_inds(self.n_inds)
+        self.P.init_haps(init_IDs, self.L)
+
+
+    def draw_recomb_vec(self):
+        """
+        Draws a recombination vector with format
+            [Offspring, Parent, StartChrom, rec1, rec2, ...]
+        """
+        ##TODO: More efficient way of getting this number +t3
+        n_lineages = len(self.P.active_haps())
+
+        parent_IDs = next_inds(self.n_inds)
+        parents = np.random.choice(parent_IDs, size=n_lineages)
+        start_chroms = np.random.randint(0, 2, n_lineages)
+
+
 
 
 @attr.s
