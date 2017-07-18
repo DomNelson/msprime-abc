@@ -73,7 +73,7 @@ class WFTree(object):
         """
         Performs forward simulations with simuPOP, saving genotypes to file
         """
-        self.FSim = fsim.ForwardSim(self.n_gens, self.initial_pop.pop,
+        self.FSim = fsim.ForwardSim(self.n_gens, self.initial_pop,
                                                     track_loci=self.track_loci)
         self.FSim.evolve()
 
@@ -103,9 +103,7 @@ class WFTree(object):
 
         ## Convert traces haplotypes into an msprime TreeSequence
         self.positions = self.FSim.pop.lociPos()
-        L = self.initial_pop.L
-        self.T = trace_tree.TreeBuilder(self.P.haps, self.positions, L,
-                                        pop_dict)
+        self.T = trace_tree.TreeBuilder(self.P.haps, self.positions, pop_dict)
         self.ts = self.T.ts
 
 
@@ -160,7 +158,7 @@ def main(args):
             mu=args.mu)
 
     W = WFTree(
-            initial_pop=initial_pop,
+            initial_pop=initial_pop.pop,
             n_gens=args.n_gens,
             h5_out=args.h5_out,
             save_genotypes=args.save_genotypes,
