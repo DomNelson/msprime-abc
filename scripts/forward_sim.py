@@ -15,10 +15,9 @@ import pop_models
 class ForwardSim(object):
     n_gens = attr.ib()
     initial_pop = attr.ib()
-    output = attr.ib(default='genotypes.txt')
+    output = attr.ib(default=None)
     track_pops = attr.ib(default=True, convert=bool)
-    track_loci = attr.ib(default=False)
-    save_genotypes = attr.ib(default=True)
+    tracked_loci = attr.ib(default=False)
 
 
     def __attrs_post_init__(self):
@@ -39,8 +38,8 @@ class ForwardSim(object):
         self.L = self.pop.genoSize() / self.pop.ploidy()
 
         ## Set details of population evolution
-        assert (type(self.track_loci) is bool or
-                                hasattr(self.track_loci, '__iter__'))
+        assert (type(self.tracked_loci) is bool or
+                                hasattr(self.tracked_loci, '__iter__'))
         self.set_Ops()
 
 
@@ -65,7 +64,7 @@ class ForwardSim(object):
         generation of the forward simulation
         """
         ## Set whether genotypes are output to file or not
-        if self.save_genotypes is True:
+        if self.output is not None:
             get_genotype = "str(int(ind.info('ind_id'))) + ','" +\
                             "+ str(ind.genotype()).strip('[]') + '\\n'"
 
@@ -81,7 +80,7 @@ class ForwardSim(object):
             self.postOps.append(sim.PyOperator(self.get_pop_inds))
 
         ## Set whether allele frequencies at specified loci are saved
-        if self.track_loci is not False:
+        if self.tracked_loci is not False:
             self.loci_freqs = []
             self.initOps.append(sim.PyOperator(self.get_freqs))
             self.postOps.append(sim.PyOperator(self.get_freqs))
@@ -170,7 +169,7 @@ class ForwardSim(object):
         frequency spectrum for each subpopulation
         """
         self.loci_freqs.append(
-                list(pop_models.simuPOP_pop_freqs(pop, loci=self.track_loci,
+                list(pop_models.simuPOP_pop_freqs(pop, loci=self.tracked_loci,
                                         ploidy=self.pop.ploidy())))
 
         return True

@@ -14,3 +14,14 @@ Demographic inference and more, using msprime and simuPOP
 * *L*, *rho*, and *mu* are in units of base pairs
 * Infinite-sites mutations with recombination doesn't seem simple to implement in simuPOP. Could specify loci under selection in forward simulations then throw down neutral mutations on trees afterwards to get full genotypes
 * Disk usage estimate: 1000 inds, 1000 loci, 100 gens writes genotypes in plain text file ~500MB along with smaller hdf5 file
+
+## hybrid\_sim.py
+### Usage:
+* Import into your script and provide ```hybrid\_sim()``` with an arbitrary tree sequence to evolve forwards in time
+* Function provided for extracting genotypes from simuPOP population - homologous chromosomes are concatenated
+* Running the script in an IPython session will evolve an example tree sequence
+* Initial demes are preserved, and arbitrary migration matrices can be specified
+
+### Notes and current limitation:
+* Fixed population size per generation for forward simulations
+* Single chromosome

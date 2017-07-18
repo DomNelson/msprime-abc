@@ -16,6 +16,7 @@ args = argparse.Namespace(
         L=1e8,
         n_loci=100,
         h5_out='gen.h5',
+        output='genotypes.txt',
         ploidy=2,
         mu=1e-9,
         t_div=100,
@@ -31,6 +32,7 @@ args2 = argparse.Namespace(
         L=1e8,
         n_loci=20,
         h5_out='gen.h5',
+        output='genotypes.txt',
         ploidy=2,
         mu=1e-9,
         t_div=100,
@@ -54,7 +56,7 @@ def source_pop_init(request):
                     grid_width=args.grid_width)
 
     init_pop = pop_models.msp_to_simuPOP(msp_pop)
-    FSim_init = fsim.ForwardSim(args.n_gens, init_pop)
+    FSim_init = fsim.ForwardSim(args.n_gens, init_pop, output=args.output)
 
     yield {'args': args, 'FSim_init': FSim_init, 'ts_init': msp_pop.ts}
 
@@ -72,7 +74,7 @@ def source_pops(request):
     init_pop = pop_models.msp_to_simuPOP(msp_pop)
 
     ##TODO: Implement mutations in forward sims +t1
-    FSim = fsim.ForwardSim(args.n_gens, init_pop, save_genotypes=True)
+    FSim = fsim.ForwardSim(args.n_gens, init_pop, output=args.output)
     FSim.evolve()
 
     ID = FSim.ID.ravel()
