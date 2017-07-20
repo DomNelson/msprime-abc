@@ -60,6 +60,19 @@ def region_overlap(regions):
             yield old_haps, points[i-1], points[i]
 
 
+def get_coalesced(haps):
+    """
+    Returns indices of haplotypes which represent completely coalesced
+    lineages
+    """
+    haps = list(haps)
+    regions = [(h.left, h.right) for h in haps]
+
+    for hap_idx, left, right in region_overlap(regions):
+        if len(hap_idx) == 1:
+            yield haps[hap_idx[0]]
+
+
 def collect_children(haps):
     """ Returns a tuple containing all children of the provided haplotypes """
     children = []
@@ -175,6 +188,12 @@ class Haplotype(object):
             yield Haplotype(self.node, left, right, self.children, self.time)
 
 
+    def deactivate(self):
+        """ Returns a deactivated copy of the haplotype """
+        return Haplotype(self.node, self.left, self.right, self.children,
+                         self.time, active=False)
+
+
 @attr.s
 class Population(object):
     """
@@ -227,8 +246,7 @@ class Population(object):
             nodes[hap.node].append(hap)
 
         for node, haps in nodes.items():
-            if len(haps) > 1:
-                yield node, haps
+            yield node, haps
 
 
     def detailed_lineage(self):
@@ -257,16 +275,6 @@ class Population(object):
             signed_chrom = bool_to_signed(chrom)
             new_node = parent * signed_chrom
 
-            ##TODO: Replace check for end of simulation +t1
-            # if new_node in self.founders:
-            #     ## Store founders as an inactive node
-            #     founder_hap = Haplotype(new_node, hap.left, hap.right,
-            #                   hap.children, hap.time, active=False)
-            #     self.haps.add(founder_hap)
-            #     self.uncoalesced_haps.append(founder_hap)
-            #     self.haps.discard(hap)
-            #     continue
-
             ## Climb to new node and discard old haplotype
             self.haps.add(hap.climb(new_node))
             self.haps.discard(hap)
@@ -279,14 +287,20 @@ class Population(object):
         """
         ## Collect and coalesce haplotypes
         common_anc_haps = list(self.common_anc_haps())
-        new_haps = coalesce_haps(common_anc_haps)
+        new_haps = list(coalesce_haps(common_anc_haps))
 
         ## Replace old haplotypes with new coalesced ones
         for node, haps in common_anc_haps:
             for h in haps:
                 self.haps.discard(h)
 
-        self.haps.update(new_haps)
+        ## Deactivate haplotypes which are the root of a lineage
+        coalesced = set(get_coalesced(new_haps))
+        for hap in new_haps:
+            if hap in coalesced:
+                self.haps.add(hap.deactivate())
+            else:
+                self.haps.add(hap)
 
 
     def recombine(self, rec_dict):
@@ -303,21 +317,32 @@ class Population(object):
         self.haps.update(new_haps)
 
 
-    def trace(self):
+    def trace(self, rec_generator):
         """ Traces coalescent events through the population lineage """
         ##NOTE: This is where we can decide to stop as soon as all lineages
         ## have coalesced +n1
+        i = 0
         while len(self.active_haps()) > 0:
-            print(len(self.active_haps()))
-            self.recombine()
-            self.climb()
+            try:
+                next_recs = next(rec_generator)
+            except StopIteration:
+                print("Max number of generations reached")
+                break
+
+            self.recombine(next_recs)
+            self.climb(next_recs)
             self.coalesce()
+
+            if i % 10 == 0:
+                print(len(self.active_haps()))
+            i += 1
 
         if self.coalesce_all is True:
             print("Coalescing all remaining haps")
             ## If set, coalesce all remaining haplotypes in a new node
-            for hap in self.uncoalesced_haps:
+            for hap in self.active_haps():
                 self.haps.add(hap.climb(self.great_anc_node))
+                self.uncoalesced_haps.append(hap)
                 self.haps.discard(hap)
 
             self.coalesce()
@@ -326,7 +351,6 @@ class Population(object):
 @attr.s
 class TreeBuilder(object):
     haps = attr.ib(convert=list)
-    positions = attr.ib(convert=list)
     pop_dict = attr.ib(default=None)
 
 
