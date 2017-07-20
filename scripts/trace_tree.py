@@ -333,8 +333,8 @@ class Population(object):
             self.climb(next_recs)
             self.coalesce()
 
-            if i % 10 == 0:
-                print(len(self.active_haps()))
+            # if i % 10 == 0:
+            print(len(self.active_haps()))
             i += 1
 
         if self.coalesce_all is True:

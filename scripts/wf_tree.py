@@ -5,7 +5,7 @@ import argparse
 import configparser
 import attr
 
-import forward_sim as fsim
+import wf_sims
 import pop_models
 import trace_tree
 
@@ -53,38 +53,18 @@ class InitialPop(object):
 
 @attr.s
 class WFTree(object):
-    initial_pop = attr.ib()
-    n_gens = attr.ib()
+    simulator = attr.ib()
     h5_out = attr.ib()
+    discrete_loci = attr.ib(default=True)
     output = attr.ib(default='genotypes.txt')
-    trace_trees = attr.ib(default=True)
     sample_size = attr.ib(default='all')
     save_genotypes = attr.ib(default=True)
     tracked_loci = attr.ib(default=False)
 
 
     def __attrs_post_init__(self):
-        self.simulate()
-
-        if self.trace_trees is True:
-            self.trace()
-
-
-    def simulate(self):
-        """
-        Performs forward simulations with simuPOP, saving genotypes to file
-        """
-        self.FSim = fsim.ForwardSim(self.n_gens, self.initial_pop,
-                            tracked_loci=self.tracked_loci, output=self.output)
-        self.FSim.evolve()
-
-        ##TODO: Save directly to hdf5 file +t2
-        if self.FSim.output is not None:
-            self.FSim.write_haplotypes(self.h5_out)
-
-        ## Initialize population and trace haplotype lineages
-        self.ID = self.FSim.ID.ravel()
-        self.recs = self.FSim.recs
+        self.trace()
+        self.set_tree_sequence()
 
 
     def trace(self):
@@ -93,18 +73,15 @@ class WFTree(object):
         """
         ## Set number of loci from initial population
         ##NOTE: Assumes a single chromosome +n2
-        n_loci = self.FSim.pop.numLoci()[0]
-        self.P = trace_tree.Population(self.ID, self.recs, self.n_gens, n_loci,
-                                        sample_size=self.sample_size)
-        self.P.trace()
+        self.P = trace_tree.Population(sample_size=self.sample_size,
+                                       discrete_loci=self.discrete_loci)
+        self.P.init_haps(self.simulator.init_IDs(), self.simulator.L)
+        self.P.trace(self.simulator.draw_recomb_vals())
 
-        ## Pass population of each individual, setting populaiton of
-        ## artificial root individual 0 to -1
-        pop_dict = dict(self.FSim.subpops.tolist())
 
+    def set_tree_sequence(self, pop_dict=None):
         ## Convert traces haplotypes into an msprime TreeSequence
-        self.positions = self.FSim.pop.lociPos()
-        self.T = trace_tree.TreeBuilder(self.P.haps, self.positions, pop_dict)
+        self.T = trace_tree.TreeBuilder(self.P.haps, pop_dict)
         self.ts = self.T.ts
 
 
@@ -158,9 +135,16 @@ def main(args):
             mig_prob=args.mig_prob,
             mu=args.mu)
 
+    B = wf_sims.BackwardSim(args.n_gens, args.n_inds, args.L, args.rho)
+
+    msp_pop = pop_models.simple_pop_ts(args.n_inds, args.rho, args.L,
+                                       args.mu, args.Ne)
+    simuPOP_pop = pop_models.msp_to_simuPOP(msp_pop)
+    F = wf_sims.ForwardSim(args.n_gens, simuPOP_pop)
+    F.evolve()
+
     W = WFTree(
-            initial_pop=initial_pop.pop,
-            n_gens=args.n_gens,
+            simulator=B,
             h5_out=args.h5_out,
             save_genotypes=args.save_genotypes,
             tracked_loci=args.tracked_loci)
@@ -170,12 +154,12 @@ def main(args):
 
 if __name__ == "__main__":
     args = argparse.Namespace(
-            n_inds=200,
+            n_inds=100,
             Ne=100,
-            n_gens=10,
+            n_gens=1000,
             rho=1e-8,
-            mu=1e-10,
-            L=1e8,
+            mu=1e-8,
+            L=1e7,
             mig_prob=0.25,
             # n_loci=20,
             h5_out='gen.h5',
