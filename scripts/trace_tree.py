@@ -9,7 +9,7 @@ import _msprime
 from _msprime import MutationGenerator, RandomGenerator
 
 
-def get_chrom(idx, start_chrom, breakpoints):
+def get_chrom(idx, start_chrom, breakpoints, discrete_loci=True):
     """
     Returns the chromosome in which idx falls, given the recombinations
     provided, as either -1 or 1
@@ -17,9 +17,15 @@ def get_chrom(idx, start_chrom, breakpoints):
     if len(breakpoints) == 0:
         return start_chrom
 
-    for i, b in enumerate(breakpoints):
-        if b >= idx:
-            return (i + start_chrom) % 2
+    if discrete_loci is True:
+        for i, b in enumerate(breakpoints):
+            if b >= idx:
+                return (i + start_chrom) % 2
+
+    else:
+        for i, b in enumerate(breakpoints):
+            if b > idx:
+                return (i + start_chrom) % 2
 
     return (i + start_chrom - 1) % 2
 
@@ -79,7 +85,7 @@ def coalesce_haps(common_anc_haps):
             children = collect_children(old_haps)
             assert len(children) > 0
 
-            ## If there is only haplotype in this region, then no
+            ## If there is only one haplotype in this region, then no
             ## coalescence happened in this segment and it stays active
             active = (len(old_haps) == 1)
 
@@ -94,44 +100,41 @@ def coalesce_haps(common_anc_haps):
                 yield Haplotype(node, left, right, [node], time, True)
 
 
-def recombine_haps(haps, rec_vec):
+def recombine_haps(haps, rec_dict, discrete_loci=True):
     """
     Climbs haplotypes to the appropriate parent node, splitting them
     if recombination occurred
     """
     ##TODO Check if these lists are necessary +t3
-    num_haps = len(haps)
-    num_recs = 0
     new_haps = []
     old_haps = []
     for hap in haps:
         ## Format is [Offspring, Parent, StartChrom, rec1, rec2, ...]
-        recs = rec_vec[3:]
+        recs = rec_dict[hap.node][3:]
 
         ## Only split if both sides of breakpoint are in Haplotype. Note that
         ## hap.right is not included in the haplotype, and splits are 
-        ## defined as happening after the recombination index
-        recs = np.array([r for r in recs[3:] if hap.left <= r < hap.right-1])
-        num_recs += len(recs)
+        ## defined as happening after the recombination index in the dicrete
+        ## case
+        if discrete_loci is True:
+            recs = np.array([r for r in recs if hap.left <= r < hap.right-1])
+        else:
+            recs = np.array([r for r in recs if hap.left <= r < hap.right])
         assert len(recs) == len(set(recs))
 
         ## Replace old haplotype with new split
         if len(recs) > 0:
-            new_haps.extend(hap.split(recs))
+            new_haps.extend(hap.split(recs, discrete_loci=discrete_loci))
             old_haps.append(hap)
 
     return old_haps, new_haps
-
-    ## We should have more haplotypes after recombination
-    assert len(self.haps) >= num_haps
-    # assert len(self.haps) == num_haps + num_recs
 
 
 @attr.s(frozen=True)
 class Haplotype(object):
     node = attr.ib(convert=int)
-    left = attr.ib(convert=int)
-    right = attr.ib(convert=int)
+    left = attr.ib(convert=float)
+    right = attr.ib(convert=float)
     children = attr.ib(convert=tuple)
     time = attr.ib(convert=int)
     active = attr.ib(default=True)
@@ -140,7 +143,7 @@ class Haplotype(object):
     def __attrs_post_init__(self):
         # assert self.node != 0 # - used as label for great anc of whole pop
         assert len(self.children) > 0
-        assert self.left <= self.right
+        assert self.left < self.right
 
 
     def climb(self, node):
@@ -149,15 +152,22 @@ class Haplotype(object):
         return Haplotype(node, self.left, self.right, self.children, time)
 
 
-    def split(self, loci_ix):
+    def split(self, loci_ix, discrete_loci=True):
         """
         Returns new haplotypes, representing the current haplotype split at
         the given loci
         """
-        ## Make sure we don't duplicate points if loci_ix contains self.left
         loci_ix = np.array(loci_ix)
-        pts = sorted(set([self.left] + list(loci_ix+1) + [self.right]))
-        assert ((loci_ix >= self.left) & (loci_ix < self.right-1)).all()
+
+        ## Make appropriate test depending if loci are indices or positions,
+        ## and make sure we don't duplicate points if loci_ix contains
+        ## self.left
+        if discrete_loci is True:
+            pts = sorted(set([self.left] + list(loci_ix+1) + [self.right]))
+            assert ((loci_ix >= self.left) & (loci_ix < self.right-1)).all()
+        else:
+            pts = sorted(set([self.left] + list(loci_ix) + [self.right]))
+            assert ((loci_ix >= self.left) & (loci_ix < self.right)).all()
 
         for i in range(len(pts)-1):
             left = pts[i]
@@ -168,11 +178,12 @@ class Haplotype(object):
 @attr.s
 class Population(object):
     """
-    A population of haplotypes, with methods for retracing coalescent trees
-    through a lineage constructed by forward simulations
+    A collection of haplotypes from a diploid population, with methods for
+    retracing coalescent trees through a Wright-Fisher process
     """
     coalesce_all = attr.ib(default=True)
     sample_size = attr.ib(default='all')
+    discrete_loci = attr.ib(default=True)
 
 
     def __attrs_post_init__(self):
@@ -228,26 +239,33 @@ class Population(object):
                           np.array(self.recs).reshape(-1, 1)])
 
 
-    def climb(self, rec_vecs):
+    def climb(self, rec_dict, check_offspring=False):
         """ Climb all haplotypes to their parent node """
-        for hap, rec_vec in zip(self.active_haps(), rec_vecs):
+        for hap in self.active_haps():
+            rec_vec = rec_dict[hap.node]
             offspring, parent, start_chrom, *breakpoints = rec_vec
-            assert offspring == np.abs(hap.node)
+
+            ## This check will generally only be valid for recs generated
+            ## by simuPOP
+            if check_offspring:
+                assert offspring == np.abs(hap.node)
 
             ## Find which parental chromosome the haplotype inherits from,
             ## given that chrom is +-1 and chrom labels are signed
-            chrom = get_chrom(hap.left, start_chrom, breakpoints)
+            chrom = get_chrom(hap.left, start_chrom, breakpoints,
+                              self.discrete_loci)
             signed_chrom = bool_to_signed(chrom)
             new_node = parent * signed_chrom
 
-            if new_node in self.founders:
-                ## Store founders as an inactive node
-                founder_hap = Haplotype(new_node, hap.left, hap.right,
-                              hap.children, hap.time, active=False)
-                self.haps.add(founder_hap)
-                self.uncoalesced_haps.append(founder_hap)
-                self.haps.discard(hap)
-                continue
+            ##TODO: Replace check for end of simulation +t1
+            # if new_node in self.founders:
+            #     ## Store founders as an inactive node
+            #     founder_hap = Haplotype(new_node, hap.left, hap.right,
+            #                   hap.children, hap.time, active=False)
+            #     self.haps.add(founder_hap)
+            #     self.uncoalesced_haps.append(founder_hap)
+            #     self.haps.discard(hap)
+            #     continue
 
             ## Climb to new node and discard old haplotype
             self.haps.add(hap.climb(new_node))
@@ -271,12 +289,12 @@ class Population(object):
         self.haps.update(new_haps)
 
 
-    def recombine(self, rec_vec):
+    def recombine(self, rec_dict):
         """
         Returns new haplotypes which have been created through recombination
         """
         haps = self.active_haps()
-        old_haps, new_haps = recombine_haps(haps, rec_vec)
+        old_haps, new_haps = recombine_haps(haps, rec_dict, self.discrete_loci)
 
         for h in old_haps:
             assert h in self.haps

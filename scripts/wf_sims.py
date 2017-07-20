@@ -20,15 +20,25 @@ def ID_increment(start=1):
         i += 1
 
 
+def draw_breakpoints(L, rho):
+    n_recs = np.random.poisson(L * rho)
+    recs = np.random.uniform(0, L, size=n_recs)
+
+    return sorted(recs)
+
+
 @attr.s
 class BackwardSim(object):
-    L = attr.ib()
     n_inds = attr.ib()
+    L = attr.ib()
+    rho = attr.ib()
+    discrete_loci = attr.ib(default=True)
 
 
     def __attrs_post_init__(self):
-        self.IDs = ID_increment(1)
-        self.P = trace_tree.Population()
+        self.IDs = ID_increment(start=1)
+        self.P = trace_tree.Population(discrete_loci=self.discrete_loci)
+        self.ped = {}
 
 
     def next_inds(self, n):
@@ -42,19 +52,29 @@ class BackwardSim(object):
         self.P.init_haps(init_IDs, self.L)
 
 
-    def draw_recomb_vec(self):
+    def draw_recomb_vals(self):
         """
-        Draws a recombination vector with format
+        Draws values for a recombination vector with format
             [Offspring, Parent, StartChrom, rec1, rec2, ...]
         """
-        ##TODO: More efficient way of getting this number +t3
-        n_lineages = len(self.P.active_haps())
+        rec_dict = {}
+        nodes = [h.node for h in self.P.active_haps()]
 
-        parent_IDs = next_inds(self.n_inds)
-        parents = np.random.choice(parent_IDs, size=n_lineages)
-        start_chroms = np.random.randint(0, 2, n_lineages)
+        ##NOTE: Varying population size here +n1
+        parent_IDs = self.next_inds(self.n_inds)
 
+        ## Offspring value not used - set as 0
+        offspring = 0
 
+        for n in nodes:
+            if n not in rec_dict:
+                start_chrom = np.random.randint(0, 2)
+                mother, father = np.random.choice(parent_IDs, size=2)
+                recs = draw_breakpoints(self.L, self.rho)
+                rec_dict[n] = [offspring, mother, start_chrom] + recs
+                rec_dict[-n] = [offspring, father, start_chrom] + recs
+
+        return rec_dict
 
 
 @attr.s
