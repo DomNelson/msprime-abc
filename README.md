@@ -5,10 +5,10 @@ Demographic inference and more, using msprime and simuPOP
 ### Known Issues:
 * ~~No mutations~~ - Simple dialleleic mutations using parameter *mu* stored in *self.muts*
 * Fixed population size per generation
-* No method to alter default initial genotypes
-* Limited to single randomly-mating population
+* ~~No method to alter default initial genotypes~~
+* ~~Limited to single randomly-mating population~~
 * Genotypes saved for all individuals in the forward simulations, rather than coalescent nodes only
-* Raw text file output by simuPOP not cleaned up after writing data in hdf5 format
+* Generates intermediate text file containing genotype data before writing as hdf5 file
 
 ### Notes:
 * *L*, *rho*, and *mu* are in units of base pairs
@@ -17,11 +17,11 @@ Demographic inference and more, using msprime and simuPOP
 
 ## hybrid\_sim.py
 ### Usage:
-* Import into your script and provide ```hybrid\_sim()``` with an arbitrary tree sequence to evolve forwards in time
+* Import into your script and provide ```hybrid_sim()``` with an arbitrary tree sequence to evolve forwards in time
 * Function provided for extracting genotypes from simuPOP population - homologous chromosomes are concatenated
 * Running the script in an IPython session will evolve an example tree sequence
 * Initial demes are preserved, and arbitrary migration matrices can be specified
 
-### Notes and current limitation:
+### Notes and current limitations:
 * Fixed population size per generation for forward simulations
-* Single chromosome
+* Single chromosome with fixed number of loci
