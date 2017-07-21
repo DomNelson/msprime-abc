@@ -11,7 +11,7 @@ python:
   # - "nightly" # currently points to 3.7-dev
 
 # Install non-python dependencies
-before install: sudo apt-get install libhdf5-7
+before install: "sudo apt-get install libhdf5-serial-dev"
 
 # command to install dependencies
 install: "pip install -r requirements.txt"
