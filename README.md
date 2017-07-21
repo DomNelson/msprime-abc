@@ -5,8 +5,6 @@ Demographic inference and more, using msprime and simuPOP
 ### Known Issues:
 * ~~No mutations~~ - Simple dialleleic mutations using parameter *mu* stored in *self.muts*
 * Fixed population size per generation
-* ~~No method to alter default initial genotypes~~
-* ~~Limited to single randomly-mating population~~
 * Genotypes saved for all individuals in the forward simulations, rather than coalescent nodes only
 * Generates intermediate text file containing genotype data before writing as hdf5 file
 
