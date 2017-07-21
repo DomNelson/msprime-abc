@@ -234,7 +234,9 @@ class ForwardSim(object):
             postOps=self.postOps,
             gen=self.n_gens)
 
-        self.parse_sim()
+        ## Don't parse if no evolution occured - used in testing
+        if self.n_gens > 0:
+            self.parse_sim()
 
 
     def get_pop_inds(self, pop):

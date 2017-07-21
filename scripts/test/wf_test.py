@@ -1,12 +1,13 @@
 import sys, os
 import numpy as np
 import pytest
-sys.path.append(os.path.abspath('../'))
+sys.path.append(os.path.abspath('./scripts/'))
 import argparse
-import copy
+import msprime
 
 import trace_tree
 import pop_models
+import hybrid_sim
 import wf_sims
 import wf_tree
 
@@ -187,10 +188,7 @@ def check_gen(Population):
 
 
 def test_treesequence(source_pops):
-    ID = source_pops['ID']
     recs = source_pops['recs']
-    n_gens = source_pops['args'].n_gens
-    n_loci = source_pops['args'].n_loci
     args = source_pops['args']
     FSim = source_pops['FSim']
     positions = source_pops['positions']
@@ -199,7 +197,6 @@ def test_treesequence(source_pops):
     W = wf_tree.WFTree(simulator=FSim, h5_out=args.h5_out)
     assert len(FSim.init_IDs) == args.n_inds * args.ploidy
     positions = FSim.pop.lociPos()
-    T = W.T
 
     ## Check we have the right number of initial haplotypes
     n_hap_leaves = len([n for n in W.P.haps if n.time == 0])
@@ -210,13 +207,13 @@ def test_treesequence(source_pops):
     breakpts = [r for rec in recs for r in rec[3:]]
     assert np.max(breakpts) <= len(positions) - 1
 
-    for t in T.ts.trees():
+    for t in W.T.ts.trees():
         assert t.num_leaves(t.root) == args.n_inds * args.ploidy
 
     ## Check genotypes along tree lineages
-    for t in T.ts.trees():
+    for t in W.T.ts.trees():
         left, right = list(map(int, t.interval))
-        genotypes = T.genotypes(t.nodes(), args.h5_out)
+        genotypes = W.T.genotypes(t.nodes(), args.h5_out)
 
         for r in t.children(t.root):
             g = set().union([tuple(genotypes[l][left:right])
@@ -234,7 +231,6 @@ def test_simuPOP_init(source_pop_init):
     simuPOP_init = source_pop_init['FSim_init'].pop
     ts_init = source_pop_init['ts_init']
     args = source_pop_init['args']
-    n_loci = len(list(ts_init.sites()))
 
     ## Check that proper number of individuals have been created
     simuPOP_n = np.sum([1 for ind in simuPOP_init.individuals()])
@@ -245,13 +241,25 @@ def test_simuPOP_init(source_pop_init):
     ## Check that genotypes are proper length, remembering that msprime
     ## simulates individual haplotypes, and simuPOP concatenates homologous
     ## chromosomes
+    n_loci = len(list(ts_init.sites()))
     ts_hap = next(ts_init.haplotypes())
     sim_ind = next(simuPOP_init.individuals()).genotype()
     assert len(ts_hap) == n_loci
     assert len(sim_ind) == n_loci * 2
 
-    sim_pop_freqs = list(pop_models.simuPOP_pop_freqs(simuPOP_init))
-    ts_freqs = list(pop_models.msprime_pop_freqs(ts_init))
+    ## Make sure each sub-population/deme has the same allele frequencies, which
+    ## is the only easy way to make sure individuals were passed on correctly
+    compare_allele_freqs(simuPOP_init, ts_init)
+
+
+def compare_allele_freqs(simuPOP_pop, ts):
+    """
+    Checks that the provided simuPOP pop and ts have the same allele
+    frequencies in each sub-population/deme
+    """
+    sim_pop_freqs = list(pop_models.simuPOP_pop_freqs(simuPOP_pop))
+    ts_freqs = list(pop_models.msprime_pop_freqs(ts))
+    n_loci = len(list(ts.sites()))
 
     assert len(sim_pop_freqs) == len(ts_freqs)
 
@@ -263,6 +271,25 @@ def test_simuPOP_init(source_pop_init):
         print(sim_freq[:20], ts_freq[:20])
         assert (sim_freq == ts_freq).all()
 
+
+def test_hybrid_sim(source_pops):
+    """
+    Explicitly test hybrid_sim.py method for performing forward simulations
+    on msprime-generated populations
+    """
+    args = source_pops['args']
+    ts = msprime.simulate(args.n_inds * args.ploidy,
+            recombination_rate=args.rho, mutation_rate=args.mu,
+            length=args.L, Ne=args.Ne)
+
+    ## Sanity check - evolve n_gens and make sure nothing breaks
+    H0 = hybrid_sim.hybrid_sim(ts, args.rho, args.mu, args.n_gens, args.ploidy)
+
+    ## Evolve for zero generations and make sure allele frequencies match
+    ## the initializing tree sequence
+    H = hybrid_sim.hybrid_sim(ts, args.rho, args.mu, 0, args.ploidy)
+
+    compare_allele_freqs(H, ts)
 
 
 
