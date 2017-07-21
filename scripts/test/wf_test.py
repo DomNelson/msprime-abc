@@ -4,9 +4,11 @@ import pytest
 sys.path.append(os.path.abspath('../'))
 import argparse
 import copy
+
 import trace_tree
 import pop_models
-import forward_sim as fsim
+import wf_sims
+import wf_tree
 
 
 args = argparse.Namespace(
@@ -42,7 +44,7 @@ args2 = argparse.Namespace(
         )
 
 ## Each item in the list will be passed once to the tests
-params = [args] * 5 + [args2] * 10
+params = [args] * 3 + [args2] * 10
 
 
 @pytest.fixture(scope='module', params=params)
@@ -56,7 +58,7 @@ def source_pop_init(request):
                     grid_width=args.grid_width)
 
     init_pop = pop_models.msp_to_simuPOP(msp_pop)
-    FSim_init = fsim.ForwardSim(args.n_gens, init_pop, output=args.output)
+    FSim_init = wf_sims.ForwardSim(args.n_gens, init_pop, output=args.output)
 
     yield {'args': args, 'FSim_init': FSim_init, 'ts_init': msp_pop.ts}
 
@@ -72,9 +74,11 @@ def source_pops(request):
                     grid_width=args.grid_width)
 
     init_pop = pop_models.msp_to_simuPOP(msp_pop)
+    for t in msp_pop.ts.trees():
+        assert t.num_leaves(t.root) == args.n_inds * args.ploidy
 
     ##TODO: Implement mutations in forward sims +t1
-    FSim = fsim.ForwardSim(args.n_gens, init_pop, output=args.output)
+    FSim = wf_sims.ForwardSim(args.n_gens, init_pop, output=args.output)
     FSim.evolve()
 
     ID = FSim.ID.ravel()
@@ -169,7 +173,8 @@ def check_gen(Population):
     for hap in Population.haps:
         assert hap.left < hap.right
         assert len(hap.children) >= 1
-        assert hap.node != 0
+        if Population.coalesce_all is False:
+            assert hap.node != 0
         lefts.append(hap.left)
         rights.append(hap.right)
 
@@ -177,37 +182,8 @@ def check_gen(Population):
     assert len(set(rights).difference(lefts)) == 1
 
 
-def test_pop(source_pops):
-    ID = source_pops['ID']
-    recs = source_pops['recs']
-    n_gens = source_pops['args'].n_gens
-    n_loci = source_pops['args'].n_loci
-
-    ## Initialize population
-    P = trace_tree.Population(ID, recs, n_gens, n_loci)
-
-    for i in range(n_gens):
-        check_gen(P)
-        start_haps = len(P.haps)
-
-        ## Check recombination step
-        P.recombine()
-        check_gen(P)
-        rec_haps = len(P.haps)
-        assert rec_haps >= start_haps
-
-        ## Check climb step
-        P.climb()
-        check_gen(P)
-        assert len(P.haps) == rec_haps
-
-        ## Check coalescence step
-        P.coalesce()
-        check_gen(P)
-        coal_haps = len(P.haps)
-        ## Condition below is not strictly true, but should be in the
-        ## majority of cases. Uncomment to check +n1
-        # assert coal_haps <= rec_haps
+##TODO: Test Population methods recombine(), climb(), and coalesce() +t2
+## ^^ I think these are sufficiently checked in other tests
 
 
 def test_treesequence(source_pops):
@@ -220,18 +196,22 @@ def test_treesequence(source_pops):
     positions = source_pops['positions']
 
     ## Test conversion to msprime TreeSequence
-    P = trace_tree.Population(ID, recs, n_gens, n_loci)
-    P.trace()
-
+    W = wf_tree.WFTree(simulator=FSim, h5_out=args.h5_out)
+    assert len(FSim.init_IDs) == args.n_inds * args.ploidy
     positions = FSim.pop.lociPos()
-    T = trace_tree.TreeBuilder(P.haps, positions)
+    T = W.T
 
-    ## Check that homologous chromosomes are split properly
+    ## Check we have the right number of initial haplotypes
+    n_hap_leaves = len([n for n in W.P.haps if n.time == 0])
+    assert n_hap_leaves == args.n_inds * args.ploidy
+
+    ## Check that homologous chromosomes are split properly. This holds
+    ## since breakpoints are indices of a finite number of loci
     breakpts = [r for rec in recs for r in rec[3:]]
     assert np.max(breakpts) <= len(positions) - 1
 
     for t in T.ts.trees():
-        assert t.num_leaves(t.root) == args.n_inds * 2
+        assert t.num_leaves(t.root) == args.n_inds * args.ploidy
 
     ## Check genotypes along tree lineages
     for t in T.ts.trees():

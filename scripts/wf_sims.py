@@ -36,7 +36,9 @@ class BackwardSim(object):
 
 
     def __attrs_post_init__(self):
+        self.discrete_loci = False
         self.IDs = ID_increment(start=1)
+        self.init_IDs = self.get_init_IDs()
 
 
     def next_inds(self, n):
@@ -46,10 +48,12 @@ class BackwardSim(object):
         return list(islice(self.IDs, 0, n))
         
 
-    def init_IDs(self):
+    def get_init_IDs(self):
         """ Returns IDs for initializing population """
-        self.init_IDs_list = self.next_inds(self.n_inds)
-        return self.init_IDs_list
+        if hasattr(self, 'init_IDs'):
+            return self.init_IDs
+        else:
+            return self.next_inds(self.n_inds)
 
 
     def draw_recomb_vals(self):
@@ -58,7 +62,7 @@ class BackwardSim(object):
             [Offspring, Parent, StartChrom, rec1, rec2, ...]
         and returns as a dict with offspring as key
         """
-        prev_gen = self.init_IDs_list
+        prev_gen = self.init_IDs
 
         for i in range(self.n_gens):
             rec_dict = {}
@@ -85,6 +89,9 @@ class BackwardSim(object):
 
 @attr.s
 class ForwardSim(object):
+    """
+    Evolves a simuPOP population forwards in time
+    """
     n_gens = attr.ib()
     simuPOP_pop = attr.ib()
     output = attr.ib(default=None)
@@ -273,15 +280,18 @@ class ForwardSim(object):
         ## Recombinations stay as a list of lists
         self.recs = sort_recombs(raw_recs)
 
+        ## Get IDs of sample nodes
+        self.init_IDs = self.get_init_IDs()
 
-    def init_IDs(self):
+
+    def get_init_IDs(self):
         """
         Gets ind IDs for initializing haplotypes for tracing coalescent trees
         """
-        n_inds = self.n_inds_per_gen[-1]
-        IDs = list(zip(*self.recs[-n_inds:]))[0]
+        n_chroms = self.n_inds_per_gen[-1] * self.simuPOP_pop.pop.ploidy()
+        init_IDs = list(zip(*self.ID[-n_chroms:]))[0]
 
-        return IDs
+        return init_IDs
 
 
     def draw_recomb_vals(self):

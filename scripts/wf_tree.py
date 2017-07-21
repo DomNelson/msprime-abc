@@ -58,13 +58,28 @@ class WFTree(object):
     discrete_loci = attr.ib(default=True)
     output = attr.ib(default='genotypes.txt')
     sample_size = attr.ib(default='all')
-    save_genotypes = attr.ib(default=True)
     tracked_loci = attr.ib(default=False)
 
 
     def __attrs_post_init__(self):
+        self.verify_simulator()
         self.trace()
         self.set_tree_sequence()
+
+
+    def verify_simulator(self):
+        """
+        Verifies that the provided simulator has the required attributes
+        and methods to be used
+        """
+        assert hasattr(self.simulator, 'L'), \
+                "Simulator must expose genome length as L"
+        assert not callable(self.simulator.init_IDs), \
+                "Simulator must expose an iterable of initial node labels"
+        assert type(self.simulator.discrete_loci) is bool, \
+                "Simulator must specify whether loci are indices or positions"
+        assert callable(self.simulator.draw_recomb_vals), \
+                "Simulator must impement a method for drawing recombinations"
 
 
     def trace(self):
@@ -74,8 +89,8 @@ class WFTree(object):
         ## Set number of loci from initial population
         ##NOTE: Assumes a single chromosome +n2
         self.P = trace_tree.Population(sample_size=self.sample_size,
-                                       discrete_loci=self.discrete_loci)
-        self.P.init_haps(self.simulator.init_IDs(), self.simulator.L)
+                                   discrete_loci=self.simulator.discrete_loci)
+        self.P.init_haps(self.simulator.init_IDs, self.simulator.L)
         self.P.trace(self.simulator.draw_recomb_vals())
 
 
@@ -146,7 +161,6 @@ def main(args):
     W = WFTree(
             simulator=B,
             h5_out=args.h5_out,
-            save_genotypes=args.save_genotypes,
             tracked_loci=args.tracked_loci)
 
     return W, initial_pop
@@ -164,7 +178,6 @@ if __name__ == "__main__":
             # n_loci=20,
             h5_out='gen.h5',
             MAF=0.1,
-            save_genotypes=False,
             tracked_loci=True
             )
 

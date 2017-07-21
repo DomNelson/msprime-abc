@@ -227,6 +227,7 @@ class Population(object):
         ## Initialize sample nodes, which do not climb
         self.haps = set([Haplotype(n, left, right, [n], time, active=False)
                     for n in node_IDs])
+        assert len(node_IDs) == len(self.haps)
 
         ## Initialize haplotypes to climb from samples
         self.haps.update(set([Haplotype(n, left, right, [n], time)
