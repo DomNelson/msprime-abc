@@ -11,10 +11,14 @@ python:
   # - "nightly" # currently points to 3.7-dev
 
 # Install non-python dependencies
-before install: "sudo apt-get install libhdf5-serial-dev"
+before install:
+    - "sudo apt-get install libhdf5-serial-dev"
+    - "sudo apt-get install python-dev"
 
 # command to install dependencies
-install: "pip install -r requirements.txt"
+install:
+    - "sudo apt-get update"
+    - "pip install -r requirements.txt"
 
 # command to run tests
 script: pytest
