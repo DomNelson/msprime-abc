@@ -1,7 +1,10 @@
 import sys, os
 import numpy as np
 import pytest
-sys.path.append(os.path.abspath('./scripts/'))
+import inspect
+curDir = os.path.join(os.path.abspath(inspect.stack()[0][1]), os.pardir)
+parentDir = os.path.abspath(os.path.join(curDir,os.pardir))
+sys.path.append(parentDir)
 import argparse
 import msprime
 
