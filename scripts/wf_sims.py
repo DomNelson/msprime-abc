@@ -1,6 +1,7 @@
 import simuOpt
 simuOpt.setOptions(alleleType='lineage', quiet=True)
 import tables
+from itertools import islice
 import attr
 import io
 import msprime
@@ -9,22 +10,103 @@ import numpy as np
 import sys, os
 
 import pop_models
+import trace_tree
+
+
+def ID_increment(start=1):
+    i = start
+    while True:
+        yield i
+        i += 1
+
+
+def draw_breakpoints(L, rho):
+    n_recs = np.random.poisson(L * rho)
+    recs = np.random.uniform(0, L, size=n_recs)
+
+    return sorted(recs)
+
+
+@attr.s
+class BackwardSim(object):
+    n_gens = attr.ib()
+    n_inds = attr.ib()
+    L = attr.ib()
+    rho = attr.ib()
+
+
+    def __attrs_post_init__(self):
+        self.discrete_loci = False
+        self.IDs = ID_increment(start=1)
+        self.init_IDs = self.get_init_IDs()
+
+
+    def next_inds(self, n):
+        """
+        Returns the next n ind IDs in sequence, which defines a generation
+        """
+        return list(islice(self.IDs, 0, n))
+        
+
+    def get_init_IDs(self):
+        """ Returns IDs for initializing population """
+        if hasattr(self, 'init_IDs'):
+            return self.init_IDs
+        else:
+            return self.next_inds(self.n_inds)
+
+
+    def draw_recomb_vals(self):
+        """
+        Draws values for a recombination vector with format
+            [Offspring, Parent, StartChrom, rec1, rec2, ...]
+        and returns as a dict with offspring as key
+        """
+        prev_gen = self.init_IDs
+
+        for i in range(self.n_gens):
+            rec_dict = {}
+
+            ##NOTE: Varying population size here +n1
+            parent_IDs = self.next_inds(self.n_inds)
+
+            ## Previous generation in initialized in init_IDs
+            for ID in prev_gen:
+                if ID not in rec_dict:
+                    start_chrom = np.random.randint(0, 2)
+
+                    ## Draw parents together, without replacement
+                    mother, father = np.random.choice(parent_IDs, size=2,
+                                                      replace=False)
+                    recs = draw_breakpoints(self.L, self.rho)
+                    rec_dict[ID] = [ID, mother, start_chrom] + recs
+                    rec_dict[-ID] = [-ID, father, start_chrom] + recs
+
+            prev_gen = parent_IDs
+
+            yield rec_dict
 
 
 @attr.s
 class ForwardSim(object):
+    """
+    Evolves a simuPOP population forwards in time
+    """
     n_gens = attr.ib()
-    initial_pop = attr.ib()
+    simuPOP_pop = attr.ib()
     output = attr.ib(default=None)
     track_pops = attr.ib(default=True, convert=bool)
     tracked_loci = attr.ib(default=False)
 
 
     def __attrs_post_init__(self):
-        self.rho = self.initial_pop.rho
-        self.mu = self.initial_pop.mu
-        self.pop = self.initial_pop.pop
-        self.migmat = self.initial_pop.migmat
+        self.rho = self.simuPOP_pop.rho
+        self.mu = self.simuPOP_pop.mu
+        self.pop = self.simuPOP_pop.pop
+        self.migmat = self.simuPOP_pop.migmat
+
+        ## Using simuPOP we always have discrete loci
+        self.discrete_loci = True
 
         ## Make sure proper info fields are present to track lineages
         info_fields = ['ind_id', 'chromosome_id', 'allele_id', 'describe',
@@ -36,6 +118,10 @@ class ForwardSim(object):
         self.n_loci = self.pop.numLoci()[0]
         assert self.n_loci > 0
         self.L = self.pop.genoSize() / self.pop.ploidy()
+
+        ##NOTE: Assumes constant population size +n1
+        n_inds = np.sum(self.pop.subPopSizes()) 
+        self.n_inds_per_gen = [n_inds for i in range(self.n_gens)]
 
         ## Set details of population evolution
         assert (type(self.tracked_loci) is bool or
@@ -148,7 +234,9 @@ class ForwardSim(object):
             postOps=self.postOps,
             gen=self.n_gens)
 
-        self.parse_sim()
+        ## Don't parse if no evolution occured - used in testing
+        if self.n_gens > 0:
+            self.parse_sim()
 
 
     def get_pop_inds(self, pop):
@@ -193,6 +281,40 @@ class ForwardSim(object):
 
         ## Recombinations stay as a list of lists
         self.recs = sort_recombs(raw_recs)
+
+        ## Get IDs of sample nodes
+        self.init_IDs = self.get_init_IDs()
+
+
+    def get_init_IDs(self):
+        """
+        Gets ind IDs for initializing haplotypes for tracing coalescent trees
+        """
+        n_chroms = self.n_inds_per_gen[-1] * self.simuPOP_pop.pop.ploidy()
+        init_IDs = list(zip(*self.ID[-n_chroms:]))[0]
+
+        return init_IDs
+
+
+    def draw_recomb_vals(self):
+        """
+        Draws values for a recombination vector with format
+            [Offspring, Parent, StartChrom, rec1, rec2, ...]
+        and returns as a dict with offspring as key
+        """
+        ## Since we're going from the end of the array to the beginning, it's
+        ## simpler to explicitly return the first chunk
+        n_chroms = self.n_inds_per_gen[-1] * self.simuPOP_pop.pop.ploidy()
+
+        yield dict(zip(self.ID[-n_chroms:].ravel(), self.recs[-n_chroms:]))
+
+        i = -1 * n_chroms
+        ##NOTE: Make sure this skipping last gen makes sense +n1
+        for n_inds in self.n_inds_per_gen[:-1]:
+            n_chroms = n_inds * self.simuPOP_pop.pop.ploidy()
+            yield dict(zip(self.ID[i-n_chroms:i].ravel(),
+                                                    self.recs[i-n_chroms:i]))
+            i = i - n_chroms
 
 
     def write_haplotypes(self, h5file):

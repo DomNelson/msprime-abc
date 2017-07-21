@@ -3,7 +3,7 @@ import msprime
 import sys, os
 import argparse
 
-import forward_sim as fsim
+import wf_sims
 import pop_models
 
 
@@ -28,7 +28,7 @@ def hybrid_sim(ts, rho, mu, n_gens, ploidy=2, migmat=None):
     simuPOP_pop = pop_models.msp_to_simuPOP(msprime_pop)
 
     ## Perform forward simulations
-    FSim = fsim.ForwardSim(n_gens, simuPOP_pop)
+    FSim = wf_sims.ForwardSim(n_gens, simuPOP_pop)
     FSim.evolve()
 
     return FSim.pop

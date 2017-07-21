@@ -5,86 +5,40 @@ import argparse
 import configparser
 import attr
 
-import forward_sim as fsim
+import wf_sims
 import pop_models
 import trace_tree
 
 
 @attr.s
-class InitialPop(object):
-    n_inds = attr.ib()
-    rho = attr.ib()
-    L = attr.ib()
-    mu = attr.ib()
-    t_div = attr.ib(default=100)
-    mig_prob = attr.ib(default=0)
-    grid_width = attr.ib(default=3)
-    Ne = attr.ib(default=1000)
-    ploidy = attr.ib(default=2)
-
-
-    def __attrs_post_init__(self):
-        self.pop = self.init_pop()
-
-
-    def init_pop(self):
-        """ Initialized population for forward simulations """
-        ## Create initial population
-        # self.msprime_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
-        #                 rho=self.rho,
-        #                 L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
-        #                 mig_prob=self.mig_prob, grid_width=self.grid_width)
-        self.msprime_pop = pop_models.simple_pop_ts(self.n_inds, self.rho,
-                        self.L, self.mu, self.Ne, self.ploidy)
-
-        initial_pop = pop_models.msp_to_simuPOP(self.msprime_pop)
-
-        # # Initialize grid of demes with a single locus
-        # N = np.array([self.n_inds for i in range(self.grid_width**2)])
-        # MAF = np.array([[0.2, 0.5]
-                             # for i in range(self.grid_width**2)]).reshape(-1, 2)
-        # migmat = pop_models.grid_migration(self.grid_width, self.mig_prob)
-        #
-        # initial_pop = pop_models.maf_init_simuPOP(N, self.rho, self.L, self.mu,
-        #                             MAF, migmat=migmat)
-
-        return initial_pop
-
-
-@attr.s
 class WFTree(object):
-    initial_pop = attr.ib()
-    n_gens = attr.ib()
+    simulator = attr.ib()
     h5_out = attr.ib()
+    discrete_loci = attr.ib(default=True)
     output = attr.ib(default='genotypes.txt')
-    trace_trees = attr.ib(default=True)
     sample_size = attr.ib(default='all')
-    save_genotypes = attr.ib(default=True)
     tracked_loci = attr.ib(default=False)
 
 
     def __attrs_post_init__(self):
-        self.simulate()
+        self.verify_simulator()
+        self.trace()
+        self.set_tree_sequence()
 
-        if self.trace_trees is True:
-            self.trace()
 
-
-    def simulate(self):
+    def verify_simulator(self):
         """
-        Performs forward simulations with simuPOP, saving genotypes to file
+        Verifies that the provided simulator has the required attributes
+        and methods to be used
         """
-        self.FSim = fsim.ForwardSim(self.n_gens, self.initial_pop,
-                            tracked_loci=self.tracked_loci, output=self.output)
-        self.FSim.evolve()
-
-        ##TODO: Save directly to hdf5 file +t2
-        if self.FSim.output is not None:
-            self.FSim.write_haplotypes(self.h5_out)
-
-        ## Initialize population and trace haplotype lineages
-        self.ID = self.FSim.ID.ravel()
-        self.recs = self.FSim.recs
+        assert hasattr(self.simulator, 'L'), \
+                "Simulator must expose genome length as L"
+        assert not callable(self.simulator.init_IDs), \
+                "Simulator must expose an iterable of initial node labels"
+        assert type(self.simulator.discrete_loci) is bool, \
+                "Simulator must specify whether loci are indices or positions"
+        assert callable(self.simulator.draw_recomb_vals), \
+                "Simulator must impement a method for drawing recombinations"
 
 
     def trace(self):
@@ -93,18 +47,15 @@ class WFTree(object):
         """
         ## Set number of loci from initial population
         ##NOTE: Assumes a single chromosome +n2
-        n_loci = self.FSim.pop.numLoci()[0]
-        self.P = trace_tree.Population(self.ID, self.recs, self.n_gens, n_loci,
-                                        sample_size=self.sample_size)
-        self.P.trace()
+        self.P = trace_tree.Population(sample_size=self.sample_size,
+                                   discrete_loci=self.simulator.discrete_loci)
+        self.P.init_haps(self.simulator.init_IDs, self.simulator.L)
+        self.P.trace(self.simulator.draw_recomb_vals())
 
-        ## Pass population of each individual, setting populaiton of
-        ## artificial root individual 0 to -1
-        pop_dict = dict(self.FSim.subpops.tolist())
 
+    def set_tree_sequence(self, pop_dict=None):
         ## Convert traces haplotypes into an msprime TreeSequence
-        self.positions = self.FSim.pop.lociPos()
-        self.T = trace_tree.TreeBuilder(self.P.haps, self.positions, pop_dict)
+        self.T = trace_tree.TreeBuilder(self.P.haps, pop_dict)
         self.ts = self.T.ts
 
 
@@ -150,38 +101,53 @@ class WFTree(object):
                 break
 
 
+def example_simulators(pop_type='simple'):
+    if pop_type == 'backwards':
+        B = wf_sims.BackwardSim(args.n_gens, args.n_inds, args.L, args.rho)
+
+        return B
+
+    if pop_type == 'simple':
+        msp_pop = pop_models.simple_pop_ts(args.n_inds, args.rho, args.L,
+                                           args.mu, args.Ne, args.ploidy)
+    elif pop_type == 'grid':
+        msp_pop = pop_models.grid_ts(N=args.n_inds*args.ploidy,
+                        rho=args.rho, L=args.L, mu=args.mu, t_div=args.t_div,
+                        Ne=args.Ne, mig_prob=args.mig_prob,
+                        grid_width=args.grid_width)
+
+    simuPOP_pop = pop_models.msp_to_simuPOP(msp_pop)
+    F = wf_sims.ForwardSim(args.n_gens, simuPOP_pop)
+    F.evolve()
+
+    return F
+
+
 def main(args):
-    initial_pop = InitialPop(
-            n_inds=args.n_inds,
-            rho=args.rho,
-            L=args.L,
-            mig_prob=args.mig_prob,
-            mu=args.mu)
+    simulator = example_simulators('backwards')
 
-    W = WFTree(
-            initial_pop=initial_pop.pop,
-            n_gens=args.n_gens,
-            h5_out=args.h5_out,
-            save_genotypes=args.save_genotypes,
-            tracked_loci=args.tracked_loci)
+    W = WFTree(simulator=simulator,
+               h5_out=args.h5_out,
+               tracked_loci=args.tracked_loci)
 
-    return W, initial_pop
+    return W
 
 
 if __name__ == "__main__":
     args = argparse.Namespace(
-            n_inds=200,
+            n_inds=100,
             Ne=100,
-            n_gens=10,
+            n_gens=1000,
             rho=1e-8,
-            mu=1e-10,
-            L=1e8,
+            mu=1e-8,
+            L=1e7,
             mig_prob=0.25,
-            # n_loci=20,
+            grid_width=2,
+            t_div=100,
             h5_out='gen.h5',
             MAF=0.1,
-            save_genotypes=False,
+            ploidy=2,
             tracked_loci=True
             )
 
-    W, initial_pop = main(args)
+    W = main(args)
