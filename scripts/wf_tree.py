@@ -11,47 +11,6 @@ import trace_tree
 
 
 @attr.s
-class InitialPop(object):
-    n_inds = attr.ib()
-    rho = attr.ib()
-    L = attr.ib()
-    mu = attr.ib()
-    t_div = attr.ib(default=100)
-    mig_prob = attr.ib(default=0)
-    grid_width = attr.ib(default=3)
-    Ne = attr.ib(default=1000)
-    ploidy = attr.ib(default=2)
-
-
-    def __attrs_post_init__(self):
-        self.pop = self.init_pop()
-
-
-    def init_pop(self):
-        """ Initialized population for forward simulations """
-        ## Create initial population
-        # self.msprime_pop = pop_models.grid_ts(N=self.n_inds*self.ploidy,
-        #                 rho=self.rho,
-        #                 L=self.L, mu=self.mu, t_div=self.t_div, Ne=self.Ne,
-        #                 mig_prob=self.mig_prob, grid_width=self.grid_width)
-        self.msprime_pop = pop_models.simple_pop_ts(self.n_inds, self.rho,
-                        self.L, self.mu, self.Ne, self.ploidy)
-
-        initial_pop = pop_models.msp_to_simuPOP(self.msprime_pop)
-
-        # # Initialize grid of demes with a single locus
-        # N = np.array([self.n_inds for i in range(self.grid_width**2)])
-        # MAF = np.array([[0.2, 0.5]
-                             # for i in range(self.grid_width**2)]).reshape(-1, 2)
-        # migmat = pop_models.grid_migration(self.grid_width, self.mig_prob)
-        #
-        # initial_pop = pop_models.maf_init_simuPOP(N, self.rho, self.L, self.mu,
-        #                             MAF, migmat=migmat)
-
-        return initial_pop
-
-
-@attr.s
 class WFTree(object):
     simulator = attr.ib()
     h5_out = attr.ib()
@@ -142,28 +101,36 @@ class WFTree(object):
                 break
 
 
-def main(args):
-    initial_pop = InitialPop(
-            n_inds=args.n_inds,
-            rho=args.rho,
-            L=args.L,
-            mig_prob=args.mig_prob,
-            mu=args.mu)
+def example_simulators(pop_type='simple'):
+    if pop_type == 'backwards':
+        B = wf_sims.BackwardSim(args.n_gens, args.n_inds, args.L, args.rho)
 
-    B = wf_sims.BackwardSim(args.n_gens, args.n_inds, args.L, args.rho)
+        return B
 
-    msp_pop = pop_models.simple_pop_ts(args.n_inds, args.rho, args.L,
-                                       args.mu, args.Ne)
+    if pop_type == 'simple':
+        msp_pop = pop_models.simple_pop_ts(args.n_inds, args.rho, args.L,
+                                           args.mu, args.Ne, args.ploidy)
+    elif pop_type == 'grid':
+        msp_pop = pop_models.grid_ts(N=args.n_inds*args.ploidy,
+                        rho=args.rho, L=args.L, mu=args.mu, t_div=args.t_div,
+                        Ne=args.Ne, mig_prob=args.mig_prob,
+                        grid_width=args.grid_width)
+
     simuPOP_pop = pop_models.msp_to_simuPOP(msp_pop)
     F = wf_sims.ForwardSim(args.n_gens, simuPOP_pop)
     F.evolve()
 
-    W = WFTree(
-            simulator=B,
-            h5_out=args.h5_out,
-            tracked_loci=args.tracked_loci)
+    return F
 
-    return W, initial_pop
+
+def main(args):
+    simulator = example_simulators('backwards')
+
+    W = WFTree(simulator=simulator,
+               h5_out=args.h5_out,
+               tracked_loci=args.tracked_loci)
+
+    return W
 
 
 if __name__ == "__main__":
@@ -175,10 +142,12 @@ if __name__ == "__main__":
             mu=1e-8,
             L=1e7,
             mig_prob=0.25,
-            # n_loci=20,
+            grid_width=2,
+            t_div=100,
             h5_out='gen.h5',
             MAF=0.1,
+            ploidy=2,
             tracked_loci=True
             )
 
-    W, initial_pop = main(args)
+    W = main(args)
