@@ -103,7 +103,8 @@ class WFTree(object):
 
 def example_simulators(pop_type='simple'):
     if pop_type == 'backwards':
-        B = wf_sims.BackwardSim(args.n_gens, args.n_inds, args.L, args.rho)
+        B = wf_sims.BackwardSim(args.n_gens, args.n_inds, args.L, args.rho,
+                                 args.Ne)
 
         return B
 
@@ -136,14 +137,14 @@ def main(args):
 
 if __name__ == "__main__":
     args = argparse.Namespace(
-            n_inds=10000,
-            Ne=100,
-            n_gens=10,
+            n_inds=100,
+            Ne=10000,
+            n_gens=50,
             rho=1e-8,
             mu=1e-8,
-            L=1e7,
+            L=1e8,
             mig_prob=0.25,
-            sample_size=2,
+            sample_size='all',
             grid_width=2,
             t_div=100,
             h5_out='gen.h5',

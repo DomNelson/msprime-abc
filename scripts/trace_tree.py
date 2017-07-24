@@ -259,16 +259,14 @@ class Population(object):
                           np.array(self.recs).reshape(-1, 1)])
 
 
-    def climb(self, rec_dict, check_offspring=False):
+    def climb(self, rec_dict):
         """ Climb all haplotypes to their parent node """
         for hap in self.active_haps():
             rec_vec = rec_dict[hap.node]
             offspring, parent, start_chrom, *breakpoints = rec_vec
 
-            ## This check will generally only be valid for recs generated
-            ## by simuPOP
-            if check_offspring:
-                assert offspring == np.abs(hap.node)
+            ## Make sure the right offspring is inheriting
+            assert np.abs(offspring) == np.abs(hap.node)
 
             ## Find which parental chromosome the haplotype inherits from,
             ## given that chrom is +-1 and chrom labels are signed

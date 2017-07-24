@@ -13,11 +13,17 @@ import pop_models
 import trace_tree
 
 
-def ID_increment(start=1):
-    i = start
+def draw_parents(lowest_ID, highest_ID):
+    """
+    Draws two (bisexual) parents within the provided ID range
+    """
+    mother = np.random.randint(lowest_ID, highest_ID)
     while True:
-        yield i
-        i += 1
+        father = np.random.randint(lowest_ID, highest_ID)
+        if father != mother:
+            break
+
+    return mother, father
 
 
 def draw_breakpoints(L, rho):
@@ -41,15 +47,17 @@ class BackwardSim(object):
         if self.N_e is None:
             self.N_e = self.n_inds
 
-        self.IDs = ID_increment(start=1)
         self.init_IDs = self.get_init_IDs()
 
 
-    def next_inds(self, n):
+    def next_inds_range(self, gen):
         """
         Returns the next n ind IDs in sequence, which defines a generation
         """
-        return list(islice(self.IDs, 0, n))
+        last_prev_ind = self.N_e * gen
+        last_new_ind = last_prev_ind + self.N_e
+
+        return last_prev_ind, last_new_ind
         
 
     def get_init_IDs(self):
@@ -57,7 +65,7 @@ class BackwardSim(object):
         if hasattr(self, 'init_IDs'):
             return self.init_IDs
         else:
-            return self.next_inds(self.n_inds)
+            return np.random.choice(np.arange(self.N_e), size=self.n_inds)
 
 
     def draw_recomb_vals(self):
@@ -68,25 +76,29 @@ class BackwardSim(object):
         """
         prev_gen = self.init_IDs
 
-        for i in range(self.n_gens):
+        for i in range(1, self.n_gens+1):
             rec_dict = {}
 
             ##NOTE: Varying population size here +n1
-            parent_IDs = self.next_inds(self.n_inds)
+            low_ID, high_ID = self.next_inds_range(gen=i)
 
             ## Previous generation in initialized in init_IDs
+            next_gen = []
             for ID in prev_gen:
                 if ID not in rec_dict:
                     start_chrom = np.random.randint(0, 2)
 
                     ## Draw parents together, without replacement
-                    mother, father = np.random.choice(parent_IDs, size=2,
-                                                      replace=False)
-                    recs = draw_breakpoints(self.L, self.rho)
-                    rec_dict[ID] = [ID, mother, start_chrom] + recs
-                    rec_dict[-ID] = [-ID, father, start_chrom] + recs
+                    mother, father = draw_parents(low_ID, high_ID)
+                    m_recs = draw_breakpoints(self.L, self.rho)
+                    f_recs = draw_breakpoints(self.L, self.rho)
+                    rec_dict[ID] = [ID, mother, start_chrom] + m_recs
+                    rec_dict[-ID] = [-ID, father, start_chrom] + f_recs
 
-            prev_gen = parent_IDs
+                    ## Extend new lineages
+                    next_gen.extend([mother, father])
+
+            prev_gen = next_gen
 
             yield rec_dict
 
