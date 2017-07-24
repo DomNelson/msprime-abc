@@ -10,6 +10,8 @@ python:
   # - "3.7-dev" # 3.7 development branch
   # - "nightly" # currently points to 3.7-dev
 
+os: osx
+
 # Install non-python dependencies
 before install:
     - "sudo apt-get install libhdf5-serial-dev"
