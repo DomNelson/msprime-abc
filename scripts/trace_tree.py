@@ -218,7 +218,8 @@ class Population(object):
         with loci numbered sequentially
         """
         if self.sample_size != 'all':
-            nodes = np.random.choice(node_IDs, size=self.sample_size)
+            node_IDs = np.random.choice(node_IDs, size=self.sample_size,
+                                        replace=False)
 
         left = 0
         right = L

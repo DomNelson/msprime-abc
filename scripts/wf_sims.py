@@ -33,10 +33,14 @@ class BackwardSim(object):
     n_inds = attr.ib()
     L = attr.ib()
     rho = attr.ib()
+    N_e = attr.ib(default=None)
 
 
     def __attrs_post_init__(self):
         self.discrete_loci = False
+        if self.N_e is None:
+            self.N_e = self.n_inds
+
         self.IDs = ID_increment(start=1)
         self.init_IDs = self.get_init_IDs()
 
@@ -309,7 +313,7 @@ class ForwardSim(object):
         yield dict(zip(self.ID[-n_chroms:].ravel(), self.recs[-n_chroms:]))
 
         i = -1 * n_chroms
-        ##NOTE: Make sure this skipping last gen makes sense +n1
+        ##TODO: Make sure this skipping last gen makes sense +t1
         for n_inds in self.n_inds_per_gen[:-1]:
             n_chroms = n_inds * self.simuPOP_pop.pop.ploidy()
             yield dict(zip(self.ID[i-n_chroms:i].ravel(),

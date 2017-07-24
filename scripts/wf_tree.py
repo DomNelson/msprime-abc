@@ -128,6 +128,7 @@ def main(args):
 
     W = WFTree(simulator=simulator,
                h5_out=args.h5_out,
+               sample_size=args.sample_size,
                tracked_loci=args.tracked_loci)
 
     return W
@@ -135,13 +136,14 @@ def main(args):
 
 if __name__ == "__main__":
     args = argparse.Namespace(
-            n_inds=100,
+            n_inds=10000,
             Ne=100,
-            n_gens=1000,
+            n_gens=10,
             rho=1e-8,
             mu=1e-8,
             L=1e7,
             mig_prob=0.25,
+            sample_size=2,
             grid_width=2,
             t_div=100,
             h5_out='gen.h5',
