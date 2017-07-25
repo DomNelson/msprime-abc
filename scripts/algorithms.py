@@ -18,6 +18,7 @@ import statsmodels.api as sm
 import matplotlib
 
 from six.moves import StringIO
+from collections import Counter
 
 # Force matplotlib to not use any Xwindows backend.
 matplotlib.use('Agg')
@@ -135,6 +136,9 @@ class Segment(object):
         self.next = None
         self.population = None
         self.index = index
+
+    def __lt__(self, other):
+        return self.left < other.left
 
     def __str__(self):
         s = "({0}:{1}-{2}->{3}: prev={4} next={5})".format(
@@ -335,47 +339,52 @@ class Simulator(object):
         """
         infinity = sys.float_info.max
         while sum(pop.get_num_ancestors() for pop in self.P) != 0:
+            self.t += 1
             self.verify()
-            rate = self.r * self.L.get_total()
-            t_re = infinity
-            if rate != 0:
-                t_re = random.expovariate(rate)
-            # Common ancestor events occur within demes.
-            t_ca = infinity
-            for index, pop in enumerate(self.P):
-                t = pop.get_common_ancestor_waiting_time(self.t)
-                if t < t_ca:
-                    t_ca = t
-                    ca_population = index
-            t_mig = infinity
-            # Migration events happen at the rates in the matrix.
+
+            ## Draw number of recombinations in current segments
+            rec_rate = self.r * self.L.get_total()
+            num_recs = np.random.poisson(rec_rate)
+
+            ## Migration events happen at the rates in the matrix.
+            migs = []
             for j in range(len(self.P)):
                 source_size = self.P[j].get_num_ancestors()
                 for k in range(len(self.P)):
-                    rate = source_size * self.migration_matrix[j][k]
-                    if rate > 0:
-                        t = random.expovariate(rate)
-                        if t < t_mig:
-                            t_mig = t
-                            mig_source = j
-                            mig_dest = k
-            min_time = min(t_re, t_ca, t_mig)
-            assert min_time != infinity
-            if self.t + min_time > self.modifier_events[0][0]:
+                    mig_rate = source_size * self.migration_matrix[j][k]
+                    num_migs = np.random.poisson(mig_rate)
+                    for _ in range(num_migs):
+                        ##TODO: How to do several migrations at once? +t1
+                        mig_source = j
+                        mig_dest = k
+                        migs.append([mig_source, mig_dest])
+
+            if self.t == self.modifier_events[0][0]:
+                ##TODO: What effect do these have on per-generation events? +t1
                 t, func, args = self.modifier_events.pop(0)
-                self.t = t
                 func(*args)
-            else:
-                self.t += min_time
-                if min_time == t_re:
-                    # print("RE EVENT")
-                    self.recombination_event()
-                elif min_time == t_ca:
-                    # print("CA EVENT")
-                    self.common_ancestor_event(ca_population)
-                else:
-                    # print("MIG EVENT")
-                    self.migration_event(mig_source, mig_dest)
+
+            for _ in range(num_recs):
+                self.recombination_event()
+
+            # self.common_ancestor_event(ca_population)
+            ## Common ancestor events occur within demes.
+            for pop_idx, pop in enumerate(self.P):
+                ##TODO: Could be more efficient to do this analytically +t2
+                parents = np.random.randint(0, pop.get_size(self.t),
+                        size=pop.get_num_ancestors())
+                H = []
+                for v in Counter(parents).values():
+                    if v > 1:
+                        for _ in range(v):
+                            x = pop.remove(0)
+                            heapq.heappush(H, (x.left, x))
+                self.merge_ancestors(H, pop_idx)
+
+            for i in range(len(migs)):
+                ##TODO: This is a stupid way of doing multiple migrations +t1
+                mig_source, mig_dest = migs[i]
+                self.migration_event(mig_source, mig_dest)
 
     def migration_event(self, j, k):
         """
