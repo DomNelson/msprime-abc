@@ -10,7 +10,7 @@ python:
 # command to install dependencies
 install: 
     - sudo apt-get update
-    - sudo apt-get install build-essential
+    - sudo apt-get install build-essential libhdf5-7 python-dev
     - pip install -r requirements.txt
     - wget https://sourceforge.net/projects/simupop/files/simupop/1.1.7/simuPOP-1.1.7-src.tar.gz
     - tar zxf simuPOP-1.1.7.tar.gz
