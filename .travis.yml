@@ -10,7 +10,12 @@ python:
 # command to install dependencies
 install: 
     - sudo apt-get update
+    - sudo apt-get install build-essential
     - pip install -r requirements.txt
+    - wget https://sourceforge.net/projects/simupop/files/simupop/1.1.7/simuPOP-1.1.7-src.tar.gz
+    - tar zxf simuPOP-1.1.7.tar.gz
+    - cd simuPOP-1.1.7
+    - python setup.py install
 
 # command to run tests
 script: pytest
