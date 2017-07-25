@@ -4,4 +4,3 @@ attr
 tables
 msprime
 pytest
-simupop
