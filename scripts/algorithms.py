@@ -341,6 +341,7 @@ class Simulator(object):
         while sum(pop.get_num_ancestors() for pop in self.P) != 0:
             self.t += 1
             self.verify()
+            # self.print_state()
 
             ## Draw number of recombinations in current segments
             rec_rate = self.r * self.L.get_total()
@@ -364,8 +365,8 @@ class Simulator(object):
                 t, func, args = self.modifier_events.pop(0)
                 func(*args)
 
-            for _ in range(num_recs):
-                self.recombination_event()
+            # for _ in range(num_recs):
+            # self.recombination_event()
 
             # self.common_ancestor_event(ca_population)
             ## Common ancestor events occur within demes.
@@ -1189,7 +1190,7 @@ def run_simulate(args):
         for k in range(num_populations)]
     sample_configuration = [0 for j in range(num_populations)]
     population_growth_rates = [0 for j in range(num_populations)]
-    population_sizes = [1 for j in range(num_populations)]
+    population_sizes = [n for j in range(num_populations)]
     sample_configuration[0] = n
     if args.sample_configuration is not None:
         sample_configuration = args.sample_configuration
@@ -1212,7 +1213,11 @@ def run_simulate(args):
     nodes_file.seek(0)
     edgesets_file.seek(0)
     ts = msprime.load_text(nodes_file, edgesets_file)
-    process_trees(ts)
+    t = next(ts.trees())
+    t.draw('/Users/dnelson/Desktop/tree.svg')
+    # process_trees(ts)
+
+    return ts
 
 def add_simulator_arguments(parser):
     parser.add_argument("sample_size", type=int)
@@ -1268,15 +1273,17 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=100,
+    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=10,
             num_replicates=1, recombination_rate=0.1, num_populations=1,
             migration_rate=1, sample_configuration=None,
             population_growth_rates=None, population_sizes=None,
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
-    run_simulate(args)
+    ts = run_simulate(args)
+
+    return ts
     # run_trees(args)
 
 
 if __name__ == "__main__":
-    main()
+    ts = main()
