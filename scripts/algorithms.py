@@ -339,6 +339,7 @@ class Simulator(object):
         """
         infinity = sys.float_info.max
         while sum(pop.get_num_ancestors() for pop in self.P) != 0:
+            print("Length:", self.L.get_total())
             self.t += 1
             self.verify()
             # self.print_state()
@@ -365,8 +366,10 @@ class Simulator(object):
                 t, func, args = self.modifier_events.pop(0)
                 func(*args)
 
-            # for _ in range(num_recs):
-            # self.recombination_event()
+            for _ in range(num_recs):
+                ## Make sure we don't run out of links to break 
+                if self.L.get_total() > 0:
+                    self.recombination_event()
 
             # self.common_ancestor_event(ca_population)
             ## Common ancestor events occur within demes.
@@ -374,13 +377,14 @@ class Simulator(object):
                 ##TODO: Could be more efficient to do this analytically +t2
                 parents = np.random.randint(0, pop.get_size(self.t),
                         size=pop.get_num_ancestors())
+                print(Counter(parents))
                 H = []
                 for v in Counter(parents).values():
                     if v > 1:
                         for _ in range(v):
                             x = pop.remove(0)
                             heapq.heappush(H, (x.left, x))
-                self.merge_ancestors(H, pop_idx)
+                    self.merge_ancestors(H, pop_idx)
 
             for i in range(len(migs)):
                 ##TODO: This is a stupid way of doing multiple migrations +t1
@@ -1273,13 +1277,14 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=10,
-            num_replicates=1, recombination_rate=0.1, num_populations=1,
+    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=100,
+            num_replicates=1, recombination_rate=0.01, num_populations=1,
             migration_rate=1, sample_configuration=None,
             population_growth_rates=None, population_sizes=None,
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
     ts = run_simulate(args)
+    print(len(list(ts.trees())))
 
     return ts
     # run_trees(args)
