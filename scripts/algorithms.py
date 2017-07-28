@@ -135,6 +135,7 @@ class Segment(object):
         self.prev = None
         self.next = None
         self.population = None
+        self.parents = None
         self.index = index
 
     def __lt__(self, other):
@@ -145,6 +146,31 @@ class Segment(object):
             self.index, self.left, self.right, self.node, repr(self.prev),
             repr(self.next))
         return s
+
+
+class Pedigree(object):
+    """
+    Stored genealogical information for the simulation
+    """
+    def __init__(self, n_inds):
+        """
+        Initializes n_inds individuals in the current generation
+        """
+        self.n_inds = n_inds
+
+
+    def draw_parents(self, n_samples, n_inds):
+        """
+        Draws n_samples from the previous generation of size n_inds
+        """
+        parents = np.zeros((n_samples, 2))
+        for i in range(n_samples):
+            prev_inds = np.arange(self.n_inds, self.n_inds + n_inds)
+            parents[i] = np.random.choice(prev_inds, 2)
+
+        self.n_inds += n_inds
+
+        return parents
 
 
 class Population(object):
@@ -160,6 +186,35 @@ class Population(object):
         # do what we need. Lists are inefficient here and should not be
         # used in a real implementation.
         self._ancestors = []
+
+    def collect_ancs(self):
+        """
+        Collects ancestors who inherit from a common parent, denoted by the
+        first entry in segment.parents list, and returns as a heap queue
+        """
+        offspring = bintrees.AVLTree()
+        has_offspring = set()
+        to_remove = []
+
+        for i, anc in enumerate(self._ancestors):
+            if anc.parents[0] not in offspring:
+                offspring[anc.parents[0]] = [i]
+            else:
+                has_offspring.add(anc.parents[0])
+                offspring[anc.parents[0]].append(i)
+
+        for parent in has_offspring:
+            H = []
+            for i in offspring[parent]:
+                to_remove.append(i)
+                x = self._ancestors[i]
+                heapq.heappush(H, (x.left, x))
+
+            yield H
+
+        ## Remove ancestors who will be merged
+        for i in sorted(to_remove, reverse=True):
+            self.remove(i)
 
     def print_state(self):
         print("Population ", self._id)
@@ -249,6 +304,8 @@ class Simulator(object):
             assert N == len(migration_matrix[j])
             assert migration_matrix[j][j] == 0
         assert sum(sample_configuration) == sample_size
+
+        self.ped = Pedigree(sample_size)
 
         self.n = sample_size
         self.m = num_loci
@@ -341,6 +398,7 @@ class Simulator(object):
         while sum(pop.get_num_ancestors() for pop in self.P) != 0:
             print("Length:", self.L.get_total())
             self.t += 1
+            print("Time:", self.t)
             self.verify()
             # self.print_state()
 
@@ -366,24 +424,23 @@ class Simulator(object):
                 t, func, args = self.modifier_events.pop(0)
                 func(*args)
 
-            for _ in range(num_recs):
-                ## Make sure we don't run out of links to break 
-                if self.L.get_total() > 0:
-                    self.recombination_event()
+            # for _ in range(num_recs):
+            #     ## Make sure we don't run out of links to break 
+            #     if self.L.get_total() > 0:
+            #         self.recombination_event()
 
             # self.common_ancestor_event(ca_population)
             ## Common ancestor events occur within demes.
             for pop_idx, pop in enumerate(self.P):
                 ##TODO: Could be more efficient to do this analytically +t2
-                parents = np.random.randint(0, pop.get_size(self.t),
-                        size=pop.get_num_ancestors())
-                print(Counter(parents))
-                H = []
-                for v in Counter(parents).values():
-                    if v > 1:
-                        for _ in range(v):
-                            x = pop.remove(0)
-                            heapq.heappush(H, (x.left, x))
+                # parents = np.random.randint(0, pop.get_size(self.t),
+                #         size=pop.get_num_ancestors())
+                parents = self.ped.draw_parents(pop.get_num_ancestors(),
+                                                pop.get_size(self.t))
+                for anc, p in zip(pop._ancestors, parents):
+                    anc.parents = p
+
+                for H in pop.collect_ancs():
                     self.merge_ancestors(H, pop_idx)
 
             for i in range(len(migs)):
@@ -1218,7 +1275,7 @@ def run_simulate(args):
     edgesets_file.seek(0)
     ts = msprime.load_text(nodes_file, edgesets_file)
     t = next(ts.trees())
-    t.draw('/Users/dnelson/Desktop/tree.svg')
+    t.draw('/Users/dnelson/Desktop/tree.svg', show_times=True)
     # process_trees(ts)
 
     return ts
