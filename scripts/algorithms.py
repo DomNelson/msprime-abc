@@ -328,8 +328,10 @@ class Simulator(object):
             self.P[pop_index].set_start_size(population_sizes[pop_index])
             self.P[pop_index].set_growth_rate(
                 population_growth_rates[pop_index], 0)
+            parents = self.ped.draw_parents(sample_size,
+                                            self.P[pop_index].get_size(0))
             for k in range(sample_size):
-                x = self.alloc_segment(0, self.m, j, pop_index)
+                x = self.alloc_segment(0, self.m, j, pop_index, parents[k])
                 self.L.set_value(x.index, self.m - 1)
                 self.P[pop_index].add(x)
                 j += 1
@@ -369,7 +371,7 @@ class Simulator(object):
         self.migration_matrix[pop_i][pop_j] = rate
 
     def alloc_segment(
-            self, left, right, node, pop_index, prev=None, next=None):
+            self, left, right, node, pop_index, parents, prev=None, next=None):
         """
         Pops a new segment off the stack and sets its properties.
         """
@@ -380,6 +382,7 @@ class Simulator(object):
         s.population = pop_index
         s.next = next
         s.prev = prev
+        s.parents = parents
         return s
 
     def free_segment(self, u):
@@ -424,13 +427,7 @@ class Simulator(object):
                 t, func, args = self.modifier_events.pop(0)
                 func(*args)
 
-            # for _ in range(num_recs):
-            #     ## Make sure we don't run out of links to break 
-            #     if self.L.get_total() > 0:
-            #         self.recombination_event()
-
-            # self.common_ancestor_event(ca_population)
-            ## Common ancestor events occur within demes.
+            ## Set parents for this generation
             for pop_idx, pop in enumerate(self.P):
                 ##TODO: Could be more efficient to do this analytically +t2
                 # parents = np.random.randint(0, pop.get_size(self.t),
@@ -440,6 +437,14 @@ class Simulator(object):
                 for anc, p in zip(pop._ancestors, parents):
                     anc.parents = p
 
+            for _ in range(num_recs):
+                ## Make sure we don't run out of links to break 
+                if self.L.get_total() > 0:
+                    self.recombination_event()
+
+            # self.common_ancestor_event(ca_population)
+            ## Common ancestor events occur within demes.
+            for pop_idx, pop in enumerate(self.P):
                 for H in pop.collect_ancs():
                     self.merge_ancestors(H, pop_idx)
 
@@ -477,7 +482,8 @@ class Simulator(object):
         if y.left < k:
             # Make new segment
             z = self.alloc_segment(
-                k, y.right, y.node, y.population, None, y.next)
+                    k, y.right, y.node, y.population, y.parents[::-1],
+                    None, y.next)
             if y.next is not None:
                 y.next.prev = z
             y.next = None
@@ -487,6 +493,7 @@ class Simulator(object):
             # split the link between x and y.
             x.next = None
             y.prev = None
+            y.parents = y.parents[::-1]
             z = y
         self.L.set_value(z.index, z.right - z.left - 1)
         self.P[z.population].add(z)
@@ -522,6 +529,13 @@ class Simulator(object):
         coalescence = False
         alpha = None
         z = None
+
+        ## Whole segment shares the same parent, since recombination has
+        ## already happened, and can happen again before next inheritance
+        assert len(set([seg.parents[0] for l, seg in H])) == 1
+        ##HACK: Doesn't follow pedigree properly?
+        par = H[0][1].parents
+
         while len(H) > 0:
             # print("LOOP HEAD")
             # self.print_heaps(H)
@@ -539,7 +553,7 @@ class Simulator(object):
                 x = X[0]
                 if len(H) > 0 and H[0][0] < x.right:
                     alpha = self.alloc_segment(
-                        x.left, H[0][0], x.node, x.population)
+                        x.left, H[0][0], x.node, x.population, par)
                     x.left = H[0][0]
                     heapq.heappush(H, (x.left, x))
                 else:
@@ -570,7 +584,7 @@ class Simulator(object):
                     while r < r_max and self.S[r] != len(X):
                         self.S[r] -= len(X) - 1
                         r = self.S.succ_key(r)
-                    alpha = self.alloc_segment(l, r, u, pop_id)
+                    alpha = self.alloc_segment(l, r, u, pop_id, par)
                 # Update the heaps and make the record.
                 children = []
                 for x in X:
