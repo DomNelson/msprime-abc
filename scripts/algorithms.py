@@ -135,6 +135,7 @@ class Segment(object):
         self.prev = None
         self.next = None
         self.population = None
+        self.ind = None
         self.parents = None
         self.index = index
 
@@ -157,20 +158,23 @@ class Pedigree(object):
         Initializes n_inds individuals in the current generation
         """
         self.n_inds = n_inds
+        self.parents = bintrees.AVLTree()
 
 
-    def draw_parents(self, n_samples, n_inds):
+    def draw_parents(self, cur_IDs, n_inds):
         """
         Draws n_samples from the previous generation of size n_inds
         """
-        parents = np.zeros((n_samples, 2))
-        for i in range(n_samples):
-            prev_inds = np.arange(self.n_inds, self.n_inds + n_inds)
-            parents[i] = np.random.choice(prev_inds, 2)
+        prev_inds = np.arange(self.n_inds, self.n_inds + n_inds).astype(int)
+
+        for ID in cur_IDs:
+            self.parents[ID] = np.random.choice(prev_inds, 2, replace=False)
 
         self.n_inds += n_inds
 
-        return parents
+
+    def __getitem__(self, idx):
+        return self.parents[idx]
 
 
 class Population(object):
@@ -187,7 +191,7 @@ class Population(object):
         # used in a real implementation.
         self._ancestors = []
 
-    def collect_ancs(self):
+    def pop_for_merge(self):
         """
         Collects ancestors who inherit from a common parent, denoted by the
         first entry in segment.parents list, and returns as a heap queue
@@ -203,6 +207,7 @@ class Population(object):
                 has_offspring.add(anc.parents[0])
                 offspring[anc.parents[0]].append(i)
 
+        H_list = []
         for parent in has_offspring:
             H = []
             for i in offspring[parent]:
@@ -210,11 +215,13 @@ class Population(object):
                 x = self._ancestors[i]
                 heapq.heappush(H, (x.left, x))
 
-            yield H
+            H_list.append(H)
 
         ## Remove ancestors who will be merged
         for i in sorted(to_remove, reverse=True):
             self.remove(i)
+
+        return H_list
 
     def print_state(self):
         print("Population ", self._id)
@@ -244,6 +251,9 @@ class Population(object):
 
     def get_num_ancestors(self):
         return len(self._ancestors)
+
+    def get_cur_parents(self):
+        return (seg.parents[0] for seg in self._ancestors)
 
     def get_size(self, t):
         """
@@ -328,10 +338,13 @@ class Simulator(object):
             self.P[pop_index].set_start_size(population_sizes[pop_index])
             self.P[pop_index].set_growth_rate(
                 population_growth_rates[pop_index], 0)
-            parents = self.ped.draw_parents(sample_size,
+
+            ## Set parents for first generation
+            self.ped.draw_parents(range(sample_size),
                                             self.P[pop_index].get_size(0))
             for k in range(sample_size):
-                x = self.alloc_segment(0, self.m, j, pop_index, parents[k])
+                x = self.alloc_segment(0, self.m, j, pop_index, self.ped[k])
+                x.ind = k
                 self.L.set_value(x.index, self.m - 1)
                 self.P[pop_index].add(x)
                 j += 1
@@ -403,7 +416,6 @@ class Simulator(object):
             self.t += 1
             print("Time:", self.t)
             self.verify()
-            # self.print_state()
 
             ## Draw number of recombinations in current segments
             rec_rate = self.r * self.L.get_total()
@@ -427,31 +439,35 @@ class Simulator(object):
                 t, func, args = self.modifier_events.pop(0)
                 func(*args)
 
-            ## Set parents for this generation
-            for pop_idx, pop in enumerate(self.P):
-                ##TODO: Could be more efficient to do this analytically +t2
-                # parents = np.random.randint(0, pop.get_size(self.t),
-                #         size=pop.get_num_ancestors())
-                parents = self.ped.draw_parents(pop.get_num_ancestors(),
-                                                pop.get_size(self.t))
-                for anc, p in zip(pop._ancestors, parents):
-                    anc.parents = p
-
             for _ in range(num_recs):
                 ## Make sure we don't run out of links to break 
                 if self.L.get_total() > 0:
                     self.recombination_event()
 
-            # self.common_ancestor_event(ca_population)
             ## Common ancestor events occur within demes.
+            ##TODO: Need to track multiple demes independently? +t2
             for pop_idx, pop in enumerate(self.P):
-                for H in pop.collect_ancs():
+                ## Climb ancestors to parents while merging segments are
+                ## removed - they climb in the merge itself
+                to_merge = pop.pop_for_merge()
+                self.ped.draw_parents(pop.get_cur_parents(),
+                                                pop.get_size(self.t))
+                for anc in pop._ancestors:
+                    # print("Climbing", anc.ind, "to", anc.parents[0])
+                    anc.ind = anc.parents[0]
+                    anc.parents = self.ped[anc.ind]
+
+                ## Draw parents for merging segments and merge them
+                merge_IDs = [H[0][1].parents[0] for H in to_merge]
+                self.ped.draw_parents(merge_IDs, pop.get_size(self.t))
+                for H in to_merge:
                     self.merge_ancestors(H, pop_idx)
 
             for i in range(len(migs)):
                 ##TODO: This is a stupid way of doing multiple migrations +t1
                 mig_source, mig_dest = migs[i]
                 self.migration_event(mig_source, mig_dest)
+
 
     def migration_event(self, j, k):
         """
@@ -533,8 +549,10 @@ class Simulator(object):
         ## Whole segment shares the same parent, since recombination has
         ## already happened, and can happen again before next inheritance
         assert len(set([seg.parents[0] for l, seg in H])) == 1
-        ##HACK: Doesn't follow pedigree properly?
-        par = H[0][1].parents
+        ind = H[0][1].parents[0] 
+        par = self.ped[H[0][1].parents[0]]
+        # print("Merging", [s[1].ind for s in H], "into", H[0][1].parents[0])
+        # print("New parents", par)
 
         while len(H) > 0:
             # print("LOOP HEAD")
@@ -585,6 +603,7 @@ class Simulator(object):
                         self.S[r] -= len(X) - 1
                         r = self.S.succ_key(r)
                     alpha = self.alloc_segment(l, r, u, pop_id, par)
+                    alpha.ind = ind
                 # Update the heaps and make the record.
                 children = []
                 for x in X:
@@ -1280,8 +1299,9 @@ def run_simulate(args):
         population_sizes, args.population_growth_rate_change,
         args.population_size_change,
         args.migration_matrix_element_change,
-        args.bottleneck, 10000)
+        args.bottleneck, 100000)
     s.simulate()
+    # print(s.ped.parents)
     nodes_file = StringIO()
     edgesets_file = StringIO()
     s.write_text(nodes_file, edgesets_file)
@@ -1348,8 +1368,8 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=100,
-            num_replicates=1, recombination_rate=0.01, num_populations=1,
+    args = argparse.Namespace(sample_size=100, random_seed=1, num_loci=10000,
+            num_replicates=1, recombination_rate=0.0001, num_populations=1,
             migration_rate=1, sample_configuration=None,
             population_growth_rates=None, population_sizes=None,
             population_size_change=[], population_growth_rate_change=[],
