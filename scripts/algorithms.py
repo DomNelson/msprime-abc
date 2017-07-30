@@ -161,20 +161,22 @@ class Pedigree(object):
         self.parents = bintrees.AVLTree()
 
 
-    def draw_parents(self, cur_IDs, n_inds):
+    def draw_parents(self, cur_IDs, pop_idx, n_inds):
         """
         Draws n_samples from the previous generation of size n_inds
         """
         prev_inds = np.arange(self.n_inds, self.n_inds + n_inds).astype(int)
 
         for ID in cur_IDs:
-            self.parents[ID] = np.random.choice(prev_inds, 2, replace=False)
+            self.parents[(pop_idx, ID)] = np.random.choice(prev_inds, 2,
+                                                    replace=False)
 
         self.n_inds += n_inds
 
 
-    def __getitem__(self, idx):
-        return self.parents[idx]
+    def __getitem__(self, pop_ind_tup):
+        pop_idx, idx = pop_ind_tup
+        return self.parents[(pop_idx, idx)]
 
 
 class Population(object):
@@ -340,10 +342,11 @@ class Simulator(object):
                 population_growth_rates[pop_index], 0)
 
             ## Set parents for first generation
-            self.ped.draw_parents(range(sample_size),
+            self.ped.draw_parents(range(sample_size), pop_index,
                                             self.P[pop_index].get_size(0))
             for k in range(sample_size):
-                x = self.alloc_segment(0, self.m, j, pop_index, self.ped[k])
+                parents = self.ped[(pop_index, k)]
+                x = self.alloc_segment(0, self.m, j, pop_index, parents)
                 x.ind = k
                 self.L.set_value(x.index, self.m - 1)
                 self.P[pop_index].add(x)
@@ -450,16 +453,16 @@ class Simulator(object):
                 ## Climb ancestors to parents while merging segments are
                 ## removed - they climb in the merge itself
                 to_merge = pop.pop_for_merge()
-                self.ped.draw_parents(pop.get_cur_parents(),
+                self.ped.draw_parents(pop.get_cur_parents(), pop_idx,
                                                 pop.get_size(self.t))
                 for anc in pop._ancestors:
                     # print("Climbing", anc.ind, "to", anc.parents[0])
                     anc.ind = anc.parents[0]
-                    anc.parents = self.ped[anc.ind]
+                    anc.parents = self.ped[(pop_idx, anc.ind)]
 
                 ## Draw parents for merging segments and merge them
                 merge_IDs = [H[0][1].parents[0] for H in to_merge]
-                self.ped.draw_parents(merge_IDs, pop.get_size(self.t))
+                self.ped.draw_parents(merge_IDs, pop_idx, pop.get_size(self.t))
                 for H in to_merge:
                     self.merge_ancestors(H, pop_idx)
 
@@ -550,7 +553,7 @@ class Simulator(object):
         ## already happened, and can happen again before next inheritance
         assert len(set([seg.parents[0] for l, seg in H])) == 1
         ind = H[0][1].parents[0] 
-        par = self.ped[H[0][1].parents[0]]
+        par = self.ped[(pop_id, H[0][1].parents[0])]
         # print("Merging", [s[1].ind for s in H], "into", H[0][1].parents[0])
         # print("New parents", par)
 
@@ -1368,9 +1371,9 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=100, random_seed=1, num_loci=10000,
-            num_replicates=1, recombination_rate=0.0001, num_populations=1,
-            migration_rate=1, sample_configuration=None,
+    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=10000,
+            num_replicates=1, recombination_rate=0.0001, num_populations=2,
+            migration_rate=0.01, sample_configuration=[5, 5],
             population_growth_rates=None, population_sizes=None,
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
