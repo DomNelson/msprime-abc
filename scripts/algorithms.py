@@ -381,7 +381,8 @@ class Simulator(object):
         for time, pop_id, intensity in bottlenecks:
             self.modifier_events.append(
                 (time, self.bottleneck_event, (int(pop_id), intensity)))
-        self.modifier_events.sort()
+            ##NOTE: Not sure why key is necessary here +n3
+            self.modifier_events.sort(key=lambda x: x[0])
 
     def change_population_size(self, pop_id, size):
         print("Changing pop size to ", size)
@@ -400,6 +401,7 @@ class Simulator(object):
         """
         Pops a new segment off the stack and sets its properties.
         """
+        print("Allocating with parents", parents)
         s = self.segment_stack.pop()
         s.left = left
         s.right = right
@@ -436,7 +438,12 @@ class Simulator(object):
                 source_size = self.P[j].get_num_inds()
                 for k in range(len(self.P)):
                     mig_rate = source_size * self.migration_matrix[j][k]
-                    num_migs = np.random.poisson(mig_rate)
+                    num_migs = min(source_size, np.random.poisson(mig_rate))
+
+                    ## If migration rate is 1, all inds migrate
+                    if self.migration_matrix[j][k] == 1:
+                        num_migs = source_size
+
                     for _ in range(num_migs):
                         ##TODO: How to do several migrations at once? +t1
                         mig_source = j
@@ -509,33 +516,58 @@ class Simulator(object):
         ## inheritance directions
         h_list = sorted(set(np.random.randint(1, self.L.get_total(),
                             size=n_recs)))
-        for h in h_list:
-            ##TODO: Check IndexError means recombination is not relevant +t1
-            # Get the segment containing the h'th link
-            try:
-                y = self.segments[self.L.find(h)]
-            except IndexError:
-                break
-            k = y.right - self.L.get_cumulative_frequency(y.index) + h - 1
-            x = y.prev
-            if y.left < k:
-                # Make new segment
-                z = self.alloc_segment(
-                        k, y.right, y.node, y.population, y.parents[::-1],
-                        None, y.next)
-                if y.next is not None:
-                    y.next.prev = z
-                y.next = None
-                y.right = k
-                self.L.increment(y.index, k - z.right)
-            else:
-                # split the link between x and y.
-                x.next = None
-                y.prev = None
-                y.parents = y.parents[::-1]
-                z = y
-            self.L.set_value(z.index, z.right - z.left - 1)
-            self.P[z.population].add(z)
+        # Get the segment containing the h'th link
+        seg_list = [self.L.find(h) for h in h_list]
+        print([self.segments[i].ind for i in seg_list])
+        i = 0
+        while i < len(seg_list):
+            new_segs = []
+            next_inheritance = None
+            cur_seg = seg_list[i]
+            s = seg_list[i]
+            ##TODO: Check this isn't skipping segments +t1
+            i += 1
+            while s == cur_seg:
+                ## Perform all recombinations that fall on the same segment
+                h = h_list[i]
+                s = seg_list[i]
+
+                ## This segment will follow the other direction than the first
+                if next_inheritance is None:
+                    next_inheritance = s
+
+                y = self.segments[s]
+                k = y.right - self.L.get_cumulative_frequency(y.index) + h - 1
+                x = y.prev
+                if y.left < k:
+                    # Make new segment
+                    z = self.alloc_segment(
+                            k, y.right, y.node, y.population, None,
+                            None, y.next)
+                    new_segs.append(z)
+                    # if y.next is not None:
+                    #     y.next.prev = z
+                    # y.next = None
+                    # y.right = k
+                    ##NOTE: This is really a decrement, since k < z.right +n1
+                    self.L.increment(y.index, k - z.right)
+                else:
+                    # split the link between x and y.
+                    x.next = None
+                    y.prev = None
+                    y.parents = y.parents[::-1]
+                    z = y
+
+                ##NOTE: This could be done in (if y.left < k) above? +n1
+                self.L.set_value(z.index, z.right - z.left - 1)
+                i += 1
+
+            for z in new_segs:
+                    # if y.next is not None:
+                    #     y.next.prev = z
+                    # y.next = None
+                    # y.right = k
+                self.P[z.population].add(z)
 
     def print_heaps(self, L):
         copy = list(L)
@@ -1302,9 +1334,13 @@ def run_simulate(args):
     m = args.num_loci
     rho = args.recombination_rate
     num_populations = args.num_populations
-    migration_matrix = [
-        [args.migration_rate * int(j != k) for j in range(num_populations)]
-        for k in range(num_populations)]
+    if args.migration_matrix is not None:
+        migration_matrix = args.migration_matrix
+    else:
+        migration_matrix = [
+            [args.migration_rate * int(j != k)
+                for j in range(num_populations)]
+                for k in range(num_populations)]
     sample_configuration = [0 for j in range(num_populations)]
     population_growth_rates = [0 for j in range(num_populations)]
     population_sizes = [n for j in range(num_populations)]
@@ -1391,12 +1427,76 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=1e7,
-            num_replicates=1, recombination_rate=1e-8, num_populations=1,
-            migration_rate=0.01, sample_configuration=[10],
-            population_growth_rates=None, population_sizes=[10000],
-            population_size_change=[], population_growth_rate_change=[],
-            migration_matrix_element_change=[], bottleneck=[])
+
+    # First we set out the maximum likelihood values of the various parameters
+    # given in Table 1.
+    N_A = 7300
+    N_B = 2100
+    N_AF = 12300
+    N_EU0 = 1000
+    N_AS0 = 510
+    # Times are provided in years, so we convert into generations.
+    generation_time = 25
+    T_AF = 220e3 / generation_time
+    T_B = 140e3 / generation_time
+    T_EU_AS = 21.2e3 / generation_time
+    # We need to work out the starting (diploid) population sizes based on
+    # the growth rates provided for these two populations
+    r_EU = 0.004
+    r_AS = 0.0055
+    N_EU = N_EU0 / math.exp(-r_EU * T_EU_AS)
+    N_AS = N_AS0 / math.exp(-r_AS * T_EU_AS)
+    # Migration rates during the various epochs.
+    m_AF_B = 25e-5
+    m_AF_EU = 3e-5
+    m_AF_AS = 1.9e-5
+    m_EU_AS = 9.6e-5
+
+    migration_matrix = [
+        [      0, m_AF_EU, m_AF_AS],
+        [m_AF_EU,       0, m_EU_AS],
+        [m_AF_AS, m_EU_AS,       0],
+    ]
+
+    mig_events = []
+    ## Reset migration rates at T_EU_AS
+    for i in range(len(migration_matrix)):
+        for j in range(len(migration_matrix[0])):
+            mig_events.append((T_EU_AS, i, j, 0))
+
+    ## Perform EU_AS "Mass migration" by setting rate to 1.0
+    mig_events.append((T_EU_AS, 2, 1, 1))
+
+    ## Set new AFR migration rate
+    mig_events.append((T_EU_AS, 0, 1, m_AF_B))
+    mig_events.append((T_EU_AS, 1, 0, m_AF_B))
+
+    ## Perform AF_EU "Mass migration" by setting rate to 1.0
+    mig_events.append((T_EU_AS, 1, 0, 1))
+
+    ## Set new population size and growth rate
+    pop_size_events = [(T_EU_AS, 1, N_B)]
+    pop_growth_events = [(T_EU_AS, 1, 0)]
+    pop_size_events.append((T_AF, 0, N_A))
+
+
+
+
+    args = argparse.Namespace(sample_size=2, random_seed=1, num_loci=1e8,
+            num_replicates=1, recombination_rate=1e-8, num_populations=3,
+            migration_matrix=migration_matrix, sample_configuration=[0, 1, 1],
+            population_growth_rates=[0, r_EU, r_AS],
+            population_sizes=[N_AF, N_EU, N_AS],
+            population_size_change=pop_size_events,
+            population_growth_rate_change=pop_growth_events,
+            migration_matrix_element_change=mig_events,
+            bottleneck=[])
+    # args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=1e5,
+    #         num_replicates=1, recombination_rate=1e-8, num_populations=1,
+    #         migration_rate=0.01, sample_configuration=None,
+    #         population_growth_rates=None, population_sizes=[10000],
+    #         population_size_change=[], population_growth_rate_change=[],
+    #         migration_matrix_element_change=[], bottleneck=[])
     ts = run_simulate(args)
     print(len(list(ts.trees())))
 
