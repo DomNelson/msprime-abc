@@ -616,7 +616,9 @@ class Simulator(object):
         ## already happened, and can happen again before next inheritance
         assert len(set([seg.parents[0] for l, seg in H])) == 1
         ind = H[0][1].ind
-        par = self.ped[(pop_id, ind)]
+        par = max([self.ped[(pop_id, h[1].ind)] for h in H], key=lambda x: x[0])
+        # print(par)
+        # par = self.ped[(pop_id, ind)]
 
         while len(H) > 0:
             # print("LOOP HEAD")
@@ -1431,10 +1433,10 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=1e8,
+    args = argparse.Namespace(sample_size=50, random_seed=1, num_loci=30e8,
             num_replicates=1, recombination_rate=1e-8, num_populations=1,
-            migration_rate=0.1, sample_configuration=[10],
-            population_growth_rates=None, population_sizes=[100],
+            migration_rate=0.1, sample_configuration=[50],
+            population_growth_rates=None, population_sizes=[50],
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
     ts = run_simulate(args)
