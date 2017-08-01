@@ -159,6 +159,8 @@ class Pedigree(object):
         """
         self.n_inds = n_inds
         self.parents = bintrees.AVLTree()
+        ##TODO: Unnecessary +t1
+        self.inds_per_gen = [np.arange(n_inds).astype(int)]
 
 
     def draw_parents(self, cur_IDs, pop_idx, n_inds):
@@ -166,6 +168,7 @@ class Pedigree(object):
         Draws n_samples from the previous generation of size n_inds
         """
         prev_inds = np.arange(self.n_inds, self.n_inds + n_inds).astype(int)
+        self.inds_per_gen.append(prev_inds)
 
         for ID in cur_IDs:
             self.parents[(pop_idx, ID)] = np.random.choice(prev_inds, 2,
@@ -253,8 +256,16 @@ class Population(object):
     def get_num_ancestors(self):
         return len(self._ancestors)
 
+    def get_num_inds(self):
+        """
+        Similar to get_num_ancestors, but not all extant segments are from
+        unique individuals in the Wright-Fisher case
+        """
+        inds = set([seg.ind for seg in self._ancestors])
+        return len(inds)
+
     def get_cur_parents(self):
-        return (seg.parents[0] for seg in self._ancestors)
+        return (p for seg in self._ancestors for p in seg.parents)
 
     def get_size(self, t):
         """
@@ -345,8 +356,7 @@ class Simulator(object):
                                             self.P[pop_index].get_size(0))
             for k in range(sample_size):
                 parents = self.ped[(pop_index, k)]
-                x = self.alloc_segment(0, self.m, j, pop_index, parents)
-                x.ind = k
+                x = self.alloc_segment(0, self.m, j, pop_index, k, parents)
                 self.L.set_value(x.index, self.m - 1)
                 self.P[pop_index].add(x)
                 j += 1
@@ -386,10 +396,12 @@ class Simulator(object):
         self.migration_matrix[pop_i][pop_j] = rate
 
     def alloc_segment(
-            self, left, right, node, pop_index, parents, prev=None, next=None):
+            self, left, right, node, pop_index, ind, parents, prev=None,
+            next=None):
         """
         Pops a new segment off the stack and sets its properties.
         """
+        assert left <= right
         s = self.segment_stack.pop()
         s.left = left
         s.right = right
@@ -397,6 +409,7 @@ class Simulator(object):
         s.population = pop_index
         s.next = next
         s.prev = prev
+        s.ind = ind
         s.parents = parents
         return s
 
@@ -405,6 +418,11 @@ class Simulator(object):
         Frees the specified segment making it ready for reuse and
         setting its weight to zero.
         """
+        # print("Freeing", u.ind)
+        u.ind = None
+        u.left = None
+        u.right = None
+        u.parents = None
         self.L.set_value(u.index, 0)
         self.segment_stack.append(u)
 
@@ -415,13 +433,17 @@ class Simulator(object):
         infinity = sys.float_info.max
         while sum(pop.get_num_ancestors() for pop in self.P) != 0:
             print("Length:", self.L.get_total())
+            print([pop.get_num_inds() for pop in self.P], "ancestors")
             self.t += 1
             print("Time:", self.t)
             self.verify()
+            for s in self.segments[1:]:
+                if s.ind is not None:
+                    assert s.ind in self.ped.inds_per_gen[self.t-1]
 
             ## Draw number of recombinations in current segments
             rec_rate = self.r * self.L.get_total()
-            num_recs = np.random.poisson(rec_rate)
+            num_recs = min(self.L.get_total() - 1, np.random.poisson(rec_rate))
 
             ## Migration events happen at the rates in the matrix.
             migs = []
@@ -441,10 +463,8 @@ class Simulator(object):
                 t, func, args = self.modifier_events.pop(0)
                 func(*args)
 
-            for _ in range(num_recs):
-                ## Make sure we don't run out of links to break 
-                if self.L.get_total() > 0:
-                    self.recombination_event()
+            if num_recs > 0:
+                self.recombination_event(num_recs)
 
             ## Common ancestor events occur within demes.
             ##TODO: Need to track multiple demes independently? +t2
@@ -453,9 +473,13 @@ class Simulator(object):
                                                 pop.get_size(self.t))
 
                 ## Climb ancestors to parents
-                for anc in pop._ancestors:
+                ##TODO: Very inefficient - should iterate pop._ancestors +t1
+                for anc in self.segments[1:]:
+                    if anc.ind is None:
+                        continue
+                    assert anc.parents[0] in self.ped.inds_per_gen[self.t]
                     anc.ind = anc.parents[0]
-                    anc.parents = self.ped[(pop_idx, anc.ind)]
+                    anc.parents = self.ped[(pop_idx, anc.parents[0])]
 
                 ## Draw parents for merging segments and merge them
                 to_merge = pop.pop_for_merge()
@@ -465,7 +489,8 @@ class Simulator(object):
             for i in range(len(migs)):
                 ##TODO: This is a stupid way of doing multiple migrations +t1
                 mig_source, mig_dest = migs[i]
-                self.migration_event(mig_source, mig_dest)
+                if self.P[j].get_num_inds() > 1:
+                    self.migration_event(mig_source, mig_dest)
 
 
     def migration_event(self, j, k):
@@ -474,6 +499,7 @@ class Simulator(object):
         """
         # print("Migrating ind from ", j, " to ", k)
         # print("Population sizes:", [len(pop) for pop in self.P])
+        ##TODO: Should be migrating inds, not segments/ancs +t1
         index = random.randint(0, self.P[j].get_num_ancestors() - 1)
         x = self.P[j].remove(index)
         self.P[k].add(x)
@@ -484,34 +510,65 @@ class Simulator(object):
             u = u.next
         # print("AFTER Population sizes:", [len(pop) for pop in self.P])
 
-    def recombination_event(self):
+    def recombination_event(self, n_recs=1):
         """
         Implements a recombination event.
         """
-        self.num_re_events += 1
-        h = random.randint(1, self.L.get_total())
-        # Get the segment containing the h'th link
-        y = self.segments[self.L.find(h)]
-        k = y.right - self.L.get_cumulative_frequency(y.index) + h - 1
-        x = y.prev
-        if y.left < k:
-            # Make new segment
-            z = self.alloc_segment(
-                    k, y.right, y.node, y.population, y.parents[::-1],
-                    None, y.next)
-            if y.next is not None:
-                y.next.prev = z
-            y.next = None
-            y.right = k
-            self.L.increment(y.index, k - z.right)
-        else:
-            # split the link between x and y.
-            x.next = None
-            y.prev = None
-            y.parents = y.parents[::-1]
-            z = y
-        self.L.set_value(z.index, z.right - z.left - 1)
-        self.P[z.population].add(z)
+        self.num_re_events += n_recs
+        h_list = sorted(set(np.random.randint(1, self.L.get_total(),
+                            size=n_recs)))
+
+        ##NOTE: If segments come sorted by ind won't need this +n2
+        ## Collect relevant segments by individual
+        ind_recs = bintrees.AVLTree()
+        for h in h_list:
+            # Get the segment containing the h'th link
+            s = self.L.find(h)
+            y = self.segments[self.L.find(h)]
+            k = y.right - self.L.get_cumulative_frequency(y.index) + h - 1
+            if (y.population, y.ind) not in ind_recs:
+                ind_recs[(y.population, y.ind)] = bintrees.AVLTree()
+            ind_recs[(y.population, y.ind)][k] = (h, y)
+
+        ## Split segments or break connections between them
+        for pop_idx, ind in ind_recs:
+            rec_list = ind_recs[(pop_idx, ind)]
+            for i, k in enumerate(list(rec_list)[::-1]):
+                h, y = rec_list[k]
+                assert y.parents[0] in self.ped.inds_per_gen[self.t]
+                assert y.parents[1] in self.ped.inds_per_gen[self.t]
+
+                ## Parents depend on the number of switches from the start,
+                ## while we're iterating backwards
+                if (len(rec_list) - i) % 2 == 0:
+                    seg_parents = y.parents
+                else:
+                    seg_parents = y.parents[::-1]
+
+                ##TODO: Could put this in case y.left >= k below +t2
+                x = y.prev
+                if y.left < k:
+                    # Make new segment
+                    z = self.alloc_segment(
+                            k, y.right, y.node, y.population, y.ind,
+                            seg_parents, None, y.next)
+                    if y.next is not None:
+                        y.next.prev = z
+                    y.next = None
+                    y.right = k
+                    self.L.increment(y.index, k - z.right)
+                else:
+                    # split the link between x and y.
+                    if x is not None:
+                        x.next = None
+                    y.prev = None
+                    y.parents = seg_parents
+                    z = y
+
+                self.L.set_value(z.index, z.right - z.left - 1)
+                ##TODO: Inefficient and unnecessary if we split properly +t1
+                if z not in self.P[z.population]:
+                    self.P[z.population].add(z)
 
     def print_heaps(self, L):
         copy = list(L)
@@ -568,7 +625,7 @@ class Simulator(object):
                 x = X[0]
                 if len(H) > 0 and H[0][0] < x.right:
                     alpha = self.alloc_segment(
-                        x.left, H[0][0], x.node, x.population, par)
+                        x.left, H[0][0], x.node, x.population, ind, par)
                     x.left = H[0][0]
                     heapq.heappush(H, (x.left, x))
                 else:
@@ -599,8 +656,7 @@ class Simulator(object):
                     while r < r_max and self.S[r] != len(X):
                         self.S[r] -= len(X) - 1
                         r = self.S.succ_key(r)
-                    alpha = self.alloc_segment(l, r, u, pop_id, par)
-                    alpha.ind = ind
+                    alpha = self.alloc_segment(l, r, u, pop_id, ind, par)
                 # Update the heaps and make the record.
                 children = []
                 for x in X:
@@ -1296,7 +1352,7 @@ def run_simulate(args):
         population_sizes, args.population_growth_rate_change,
         args.population_size_change,
         args.migration_matrix_element_change,
-        args.bottleneck, 100000)
+        args.bottleneck, 10000)
     s.simulate()
     # print(s.ped.parents)
     nodes_file = StringIO()
@@ -1365,10 +1421,10 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=10000,
-            num_replicates=1, recombination_rate=0.0001, num_populations=2,
-            migration_rate=0.01, sample_configuration=[5, 5],
-            population_growth_rates=None, population_sizes=None,
+    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=100,
+            num_replicates=1, recombination_rate=0.01, num_populations=1,
+            migration_rate=0.1, sample_configuration=[10],
+            population_growth_rates=None, population_sizes=[100],
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
     ts = run_simulate(args)
