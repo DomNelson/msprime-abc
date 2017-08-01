@@ -198,26 +198,25 @@ class Population(object):
         Collects ancestors who inherit from a common parent, denoted by the
         first entry in segment.parents list, and returns as a heap queue
         """
-        offspring = bintrees.AVLTree()
-        has_offspring = set()
-        to_remove = []
+        inds = bintrees.AVLTree()
 
         for i, anc in enumerate(self._ancestors):
-            if anc.parents[0] not in offspring:
-                offspring[anc.parents[0]] = [i]
+            if anc.ind not in inds:
+                inds[anc.ind] = [i]
             else:
-                has_offspring.add(anc.parents[0])
-                offspring[anc.parents[0]].append(i)
+                inds[anc.ind].append(i)
 
         H_list = []
-        for parent in has_offspring:
-            H = []
-            for i in offspring[parent]:
-                to_remove.append(i)
-                x = self._ancestors[i]
-                heapq.heappush(H, (x.left, x))
+        to_remove = []
+        for ind in inds:
+            if len(inds[ind]) > 1:
+                H = []
+                for i in inds[ind]:
+                    to_remove.append(i)
+                    x = self._ancestors[i]
+                    heapq.heappush(H, (x.left, x))
 
-            H_list.append(H)
+                H_list.append(H)
 
         ## Remove ancestors who will be merged
         for i in sorted(to_remove, reverse=True):
@@ -450,19 +449,16 @@ class Simulator(object):
             ## Common ancestor events occur within demes.
             ##TODO: Need to track multiple demes independently? +t2
             for pop_idx, pop in enumerate(self.P):
-                ## Climb ancestors to parents while merging segments are
-                ## removed - they climb in the merge itself
-                to_merge = pop.pop_for_merge()
                 self.ped.draw_parents(pop.get_cur_parents(), pop_idx,
                                                 pop.get_size(self.t))
+
+                ## Climb ancestors to parents
                 for anc in pop._ancestors:
-                    # print("Climbing", anc.ind, "to", anc.parents[0])
                     anc.ind = anc.parents[0]
                     anc.parents = self.ped[(pop_idx, anc.ind)]
 
                 ## Draw parents for merging segments and merge them
-                merge_IDs = [H[0][1].parents[0] for H in to_merge]
-                self.ped.draw_parents(merge_IDs, pop_idx, pop.get_size(self.t))
+                to_merge = pop.pop_for_merge()
                 for H in to_merge:
                     self.merge_ancestors(H, pop_idx)
 
@@ -552,10 +548,8 @@ class Simulator(object):
         ## Whole segment shares the same parent, since recombination has
         ## already happened, and can happen again before next inheritance
         assert len(set([seg.parents[0] for l, seg in H])) == 1
-        ind = H[0][1].parents[0] 
-        par = self.ped[(pop_id, H[0][1].parents[0])]
-        # print("Merging", [s[1].ind for s in H], "into", H[0][1].parents[0])
-        # print("New parents", par)
+        ind = H[0][1].ind
+        par = self.ped[(pop_id, ind)]
 
         while len(H) > 0:
             # print("LOOP HEAD")
