@@ -437,9 +437,6 @@ class Simulator(object):
             self.t += 1
             print("Time:", self.t)
             self.verify()
-            for s in self.segments[1:]:
-                if s.ind is not None:
-                    assert s.ind in self.ped.inds_per_gen[self.t-1]
 
             ## Draw number of recombinations in current segments
             rec_rate = self.r * self.L.get_total()
@@ -474,10 +471,10 @@ class Simulator(object):
 
                 ## Climb ancestors to parents
                 ##TODO: Very inefficient - should iterate pop._ancestors +t1
-                for anc in self.segments[1:]:
-                    if anc.ind is None:
-                        continue
-                    assert anc.parents[0] in self.ped.inds_per_gen[self.t]
+                for anc in pop._ancestors:
+                # for anc in self.segments[1:]:
+                    # if anc.ind is None:
+                    #     continue
                     anc.ind = anc.parents[0]
                     anc.parents = self.ped[(pop_idx, anc.parents[0])]
 
@@ -525,6 +522,19 @@ class Simulator(object):
             # Get the segment containing the h'th link
             s = self.L.find(h)
             y = self.segments[self.L.find(h)]
+
+            ##TODO: Should match parents along ancestors separately +t1
+            x = y
+            while x.prev is not None:
+                x = x.prev
+            if (x.parents > y.parents).any():
+                y.parents = x.parents
+            x = y
+            while x.next is not None:
+                x = x.next
+            if (x.parents > y.parents).any():
+                y.parents = x.parents
+
             k = y.right - self.L.get_cumulative_frequency(y.index) + h - 1
             if (y.population, y.ind) not in ind_recs:
                 ind_recs[(y.population, y.ind)] = bintrees.AVLTree()
@@ -1421,8 +1431,8 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=100,
-            num_replicates=1, recombination_rate=0.01, num_populations=1,
+    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=1e8,
+            num_replicates=1, recombination_rate=1e-8, num_populations=1,
             migration_rate=0.1, sample_configuration=[10],
             population_growth_rates=None, population_sizes=[100],
             population_size_change=[], population_growth_rate_change=[],
