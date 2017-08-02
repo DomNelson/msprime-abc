@@ -466,15 +466,23 @@ class Simulator(object):
             ## Common ancestor events occur within demes.
             ##TODO: Need to track multiple demes independently? +t2
             for pop_idx, pop in enumerate(self.P):
-                self.ped.draw_parents(pop.get_cur_parents(), pop_idx,
+                cur_parents = []
+                for s in self.segments[1:]:
+                    if s.parents is not None:
+                        cur_parents.extend(s.parents)
+                cur_parents = set(cur_parents)
+
+                self.ped.draw_parents(cur_parents, pop_idx,
                                                 pop.get_size(self.t))
+                # self.ped.draw_parents(pop.get_cur_parents(), pop_idx,
+                #                                 pop.get_size(self.t))
 
                 ## Climb ancestors to parents
                 ##TODO: Very inefficient - should iterate pop._ancestors +t1
-                for anc in pop._ancestors:
-                # for anc in self.segments[1:]:
-                    # if anc.ind is None:
-                    #     continue
+                # for anc in pop._ancestors:
+                for anc in self.segments[1:]:
+                    if anc.ind is None:
+                        continue
                     anc.ind = anc.parents[0]
                     anc.parents = self.ped[(pop_idx, anc.parents[0])]
 
@@ -1433,10 +1441,10 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=50, random_seed=1, num_loci=30e8,
+    args = argparse.Namespace(sample_size=50, random_seed=1, num_loci=3e8,
             num_replicates=1, recombination_rate=1e-8, num_populations=1,
             migration_rate=0.1, sample_configuration=[50],
-            population_growth_rates=None, population_sizes=[50],
+            population_growth_rates=None, population_sizes=[500],
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
     ts = run_simulate(args)
