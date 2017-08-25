@@ -142,6 +142,9 @@ class Segment(object):
             repr(self.next))
         return s
 
+    def __lt__(self, other):
+        return self.left < other.left
+
 
 class Population(object):
     """
@@ -193,7 +196,7 @@ class Population(object):
         first_ind = np.sum([self.get_size(t_prev) for t_prev in range(0, t)])
         last_ind = first_ind + self.get_size(t)
 
-        return range(first_ind, last_ind+1)
+        return range(int(first_ind), int(last_ind)+1)
 
 
     def get_size(self, t):
@@ -263,7 +266,7 @@ class Simulator(object):
             self.segment_stack.append(s)
         self.P = [Population(id_) for id_ in range(N)]
         self.C = []
-        self.L = FenwickTree(self.max_segments)
+        # self.L = FenwickTree(self.max_segments)
         self.S = bintrees.AVLTree()
         j = 0
         for pop_index in range(N):
@@ -273,7 +276,7 @@ class Simulator(object):
                 population_growth_rates[pop_index], 0)
             for k in range(sample_size):
                 x = self.alloc_segment(0, self.m, j, pop_index)
-                self.L.set_value(x.index, self.m - 1)
+                # self.L.set_value(x.index, self.m - 1)
                 self.P[pop_index].add(x)
                 j += 1
         self.S[0] = self.n
@@ -330,7 +333,7 @@ class Simulator(object):
         Frees the specified segment making it ready for reuse and
         setting its weight to zero.
         """
-        self.L.set_value(u.index, 0)
+        # self.L.set_value(u.index, 0)
         self.segment_stack.append(u)
 
     def simulate(self):
@@ -339,56 +342,68 @@ class Simulator(object):
         """
         while sum(pop.get_num_ancestors() for pop in self.P) != 0:
             self.t += 1
+            print(self.t)
+            print(self.S)
+            print("Recs:", self.num_re_events)
             self.verify()
-
-            # self.recombination_event()
-            # self.common_ancestor_event(ca_population)
 
             for pop_idx, pop in enumerate(self.P):
                 ## Cluster haploid inds by parent
                 cur_inds = pop.get_ind_range(self.t)
                 offspring = bintrees.AVLTree()
-                for i, anc in enumerate(pop):
-                    ##TODO: Is this necessary? Removes and adds all segments
-                    pop.remove(i) 
+                for anc in pop:
+                    self.recombine(child)
                     parent = np.random.choice(cur_inds)
                     if parent not in offspring:
                         offspring[parent] = []
                     offspring[parent].append(anc)
 
+                ## Remove segments to be merged from the population
+                for s_ix in sorted(to_remove)[::-1]:
+                    pop.remove(s_ix)
+
                 ## Draw recombinations in children and sort segments by
                 ## inheritance direction
                 for children in offspring.values():
-                    parents = np.random.choice(cur_inds, 2, replace=False)
                     H = [[], []]
-                    for child in children:
+                    for child in sorted(children)[::-1]:
                         segs1, segs2 = self.recombine(child)
 
                         ## Collect segments inherited from the same individual
-                        ix1 = np.random.randint(2)
-                        ix2 = (ix1 + 1) % 2
-                        for s1, s2 in zip(segs1, segs2):
-                            heapq.heappush(H[ix1], (s1.left, s1))
-                            heapq.heappush(H[ix2], (s2.left, s2))
+                        for s in segs1:
+                            heapq.heappush(H[0], (s.left, s))
+                        for s in segs2:
+                            heapq.heappush(H[1], (s.left, s))
 
-                        ## Merge segments
-                        self.merge_ancestors(H[0], pop_idx)
-                        self.merge_ancestors(H[1], pop_idx)
+                    ## Merge segments
+                    for h in H:
+                        if len(h) == 1:
+                            print("Single segment - adding back to pop")
+                            assert h[0][1].prev is None
+                            pop.add(h[0][1])
+                            continue
+                        for tup in h:
+                            print("Merging", tup[1])
+                        self.merge_ancestors(h, pop_idx)
 
+                    for u in pop:
+                        assert u.prev is None
+                        for v in pop:
+                            assert v.next is not u
 
             ## Migration events happen at the rates in the matrix.
-            for j in range(len(self.P)):
-                source_size = self.P[j].get_num_ancestors()
-                for k in range(len(self.P)):
-                    if j == k:
-                        continue
-                    mig_rate = source_size * self.migration_matrix[j][k]
-                    num_migs = np.random.poisson(mig_rate)
-                    for _ in range(num_migs):
-                        ##TODO: Find better way to do multiple migrations? +t1
-                        mig_source = j
-                        mig_dest = k
-                        self.migration_event(mig_source, mig_dest)
+            # for j in range(len(self.P)):
+            #     source_size = self.P[j].get_num_ancestors()
+            #     for k in range(len(self.P)):
+            #         if j == k:
+            #             continue
+            #         mig_rate = source_size * self.migration_matrix[j][k]
+            #         num_migs = np.random.poisson(mig_rate)
+            #         for _ in range(num_migs):
+            #             ##TODO: Find better way to do multiple migrations? +t1
+            #             mig_source = j
+            #             mig_dest = k
+            #             self.migration_event(mig_source, mig_dest)
 
 
     def migration_event(self, j, k):
@@ -413,17 +428,23 @@ class Simulator(object):
         Chooses breakpoints and returns segments sorted by inheritance
         direction, by iterating through segment chain starting with x
         """
-        k = x.left + np.random.exponential(1. / self.recombination_rate)
-        segs = [[], [x]]
-        ix = 0
+        k = x.left + np.random.exponential(1. / self.r)
+        segs = [[], []]
+        ix = np.random.randint(2)
 
         while x is not None:
+            segs[ix].append(x)
             y = x.next
-            if x.right > k or (y is not None and y.left > k):
+            while x.right > k:
                 z = self.recombination_event(x, k)
-                heapq.heappush(segs[ix], (z.left, z))
+                segs[ix].append(z)
                 ix = (ix + 1) % 2
-                k = k + np.random.exponential(1. / self.recombination_rate)
+                k = k + np.random.exponential(1. / self.r)
+                x = z
+            if y is not None:
+                while y.left > k:
+                    ix = (ix + 1) % 2
+                    k = k + np.random.exponential(1. / self.r)
             x = y
 
         return segs
@@ -439,7 +460,7 @@ class Simulator(object):
         if x.right > k:
             # Make new segment
             z = self.alloc_segment(
-                x.left, k, x.node, x.population, None, x.next)
+                k, x.right, x.node, x.population, None, x.next)
             if x.next is not None:
                 x.next.prev = z
             x.next = None
@@ -448,11 +469,12 @@ class Simulator(object):
             # split the link between x and y.
             y = x.next
             assert y is not None # Otherwise recombination is irrelevant
+            assert y.left > k
             x.next = None
             y.prev = None
             z = y
 
-        self.P[z.population].add(z)
+        # self.P[z.population].add(z)
 
         return z
 
@@ -489,6 +511,9 @@ class Simulator(object):
         alpha = None
         z = None
         while len(H) > 0:
+            print("In merge,", len(H), "segments")
+            for u in pop:
+                assert u.prev is None
             # print("LOOP HEAD")
             # self.print_heaps(H)
             alpha = None
@@ -554,13 +579,15 @@ class Simulator(object):
             # loop tail; update alpha and integrate it into the state.
             if alpha is not None:
                 if z is None:
+                    assert alpha.prev is None
+                    print("Adding", alpha)
                     pop.add(alpha)
-                    self.L.set_value(alpha.index, alpha.right - alpha.left - 1)
+                    # self.L.set_value(alpha.index, alpha.right - alpha.left - 1)
                 else:
                     defrag_required |= (
                         z.right == alpha.left and z.node == alpha.node)
                     z.next = alpha
-                    self.L.set_value(alpha.index, alpha.right - z.right)
+                    # self.L.set_value(alpha.index, alpha.right - z.right)
                 alpha.prev = z
                 z = alpha
         if defrag_required:
@@ -577,7 +604,7 @@ class Simulator(object):
                 x.next = y.next
                 if y.next is not None:
                     y.next.prev = x
-                self.L.increment(x.index, y.right - y.left)
+                # self.L.increment(x.index, y.right - y.left)
                 self.free_segment(y)
             y = x
 
@@ -728,7 +755,7 @@ class Simulator(object):
                         s = u.right - u.prev.right
                     else:
                         s = u.right - u.left - 1
-                    assert s == self.L.get_frequency(u.index)
+                    # assert s == self.L.get_frequency(u.index)
                     right = u.right
                     v = u.next
                     if v is not None:
@@ -738,7 +765,7 @@ class Simulator(object):
                         assert u.right <= v.left
                     u = v
                 q += right - left - 1
-        assert q == self.L.get_total()
+        # assert q == self.L.get_total()
 
         assert self.S[self.m] == -1
         # Check the ancestry tracking.
@@ -1276,27 +1303,38 @@ def add_simulator_arguments(parser):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    # This is required to get uniform behaviour in Python2 and Python3
-    subparsers = parser.add_subparsers(dest="subcommand")
-    subparsers.required = True
+    # parser = argparse.ArgumentParser()
+    # # This is required to get uniform behaviour in Python2 and Python3
+    # subparsers = parser.add_subparsers(dest="subcommand")
+    # subparsers.required = True
+    #
+    # simulate_parser = subparsers.add_parser(
+    #     "simulate",
+    #     help="Simulate the process and output the results in text")
+    # add_simulator_arguments(simulate_parser)
+    # simulate_parser.set_defaults(runner=run_simulate)
+    #
+    # trees_parser = subparsers.add_parser(
+    #     "trees",
+    #     help="Shows the trees from an text records file")
+    # trees_parser.add_argument("history_file")
+    #
+    # trees_parser.set_defaults(runner=run_trees)
+    #
+    # args = parser.parse_args()
+    # args.runner(args)
+    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=3e8,
+            num_replicates=1, recombination_rate=1e-8, num_populations=1,
+            migration_rate=0.1, sample_configuration=[10],
+            population_growth_rates=None, population_sizes=[10],
+            population_size_change=[], population_growth_rate_change=[],
+            migration_matrix_element_change=[], bottleneck=[])
+    ts = run_simulate(args)
+    print(len(list(ts.trees())))
 
-    simulate_parser = subparsers.add_parser(
-        "simulate",
-        help="Simulate the process and output the results in text")
-    add_simulator_arguments(simulate_parser)
-    simulate_parser.set_defaults(runner=run_simulate)
-
-    trees_parser = subparsers.add_parser(
-        "trees",
-        help="Shows the trees from an text records file")
-    trees_parser.add_argument("history_file")
-
-    trees_parser.set_defaults(runner=run_trees)
-
-    args = parser.parse_args()
-    args.runner(args)
+    return ts
+    # run_trees(args)
 
 
 if __name__ == "__main__":
-    main()
+    ts = main()
