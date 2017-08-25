@@ -351,39 +351,31 @@ class Simulator(object):
                 ## Cluster haploid inds by parent
                 cur_inds = pop.get_ind_range(self.t)
                 offspring = bintrees.AVLTree()
-                for anc in pop:
-                    self.recombine(child)
+                for i in range(pop.get_num_ancestors()-1, -1, -1):
+                    ##TODO: Is this necessary? Pops and adds every anc
+                    anc = pop.remove(i)
                     parent = np.random.choice(cur_inds)
                     if parent not in offspring:
                         offspring[parent] = []
                     offspring[parent].append(anc)
-
-                ## Remove segments to be merged from the population
-                for s_ix in sorted(to_remove)[::-1]:
-                    pop.remove(s_ix)
 
                 ## Draw recombinations in children and sort segments by
                 ## inheritance direction
                 for children in offspring.values():
                     H = [[], []]
                     for child in sorted(children)[::-1]:
-                        segs1, segs2 = self.recombine(child)
+                        segs_pair = self.recombine(child)
 
                         ## Collect segments inherited from the same individual
-                        for s in segs1:
-                            heapq.heappush(H[0], (s.left, s))
-                        for s in segs2:
-                            heapq.heappush(H[1], (s.left, s))
+                        for i, segs in enumerate(segs_pair):
+                            for s in segs:
+                                heapq.heappush(H[i], (s.left, s))
 
                     ## Merge segments
                     for h in H:
                         if len(h) == 1:
-                            print("Single segment - adding back to pop")
-                            assert h[0][1].prev is None
                             pop.add(h[0][1])
                             continue
-                        for tup in h:
-                            print("Merging", tup[1])
                         self.merge_ancestors(h, pop_idx)
 
                     for u in pop:
