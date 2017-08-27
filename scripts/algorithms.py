@@ -136,6 +136,13 @@ class Segment(object):
         self.population = None
         self.index = index
 
+        if self.prev is not None:
+            assert not (self.left == self.prev.left and
+                        self.right == self.prev.right and
+                        self.node == self.prev.node and
+                        self.population == self.prev.population and
+                        self.index == self.prev.index)
+
     def __str__(self):
         s = "({0}:{1}-{2}->{3}: prev={4} next={5})".format(
             self.index, self.left, self.right, self.node, repr(self.prev),
@@ -352,7 +359,7 @@ class Simulator(object):
                 cur_inds = pop.get_ind_range(self.t)
                 offspring = bintrees.AVLTree()
                 for i in range(pop.get_num_ancestors()-1, -1, -1):
-                    ##TODO: Is this necessary? Pops and adds every anc
+                    ##TODO: Could only remove if recombination occurs
                     anc = pop.remove(i)
                     parent = np.random.choice(cur_inds)
                     if parent not in offspring:
@@ -363,17 +370,19 @@ class Simulator(object):
                 ## inheritance direction
                 for children in offspring.values():
                     H = [[], []]
-                    for child in sorted(children)[::-1]:
+                    for child in children:
                         segs_pair = self.recombine(child)
 
                         ## Collect segments inherited from the same individual
                         for i, segs in enumerate(segs_pair):
                             for s in segs:
+                                assert s.prev is None
                                 heapq.heappush(H[i], (s.left, s))
 
                     ## Merge segments
                     for h in H:
                         if len(h) == 1:
+                            assert h[0][1].prev is None
                             pop.add(h[0][1])
                             continue
                         self.merge_ancestors(h, pop_idx)
@@ -423,21 +432,33 @@ class Simulator(object):
         k = x.left + np.random.exponential(1. / self.r)
         segs = [[], []]
         ix = np.random.randint(2)
+        segs[ix].append(x)
+        y = x.next
 
-        while x is not None:
-            segs[ix].append(x)
-            y = x.next
-            while x.right > k:
-                z = self.recombination_event(x, k)
-                segs[ix].append(z)
+        while x.right > k:
+            # Make new segment
+            self.num_re_events += 1
+            z = self.alloc_segment(
+                k, x.right, x.node, x.population, None, x.next)
+            if x.next is not None:
+                x.next.prev = z
+            x.next = None
+            x.right = k
+            segs[ix].append(z)
+            ix = (ix + 1) % 2
+            k = k + np.random.exponential(1. / self.r)
+            x = z
+        if y is not None and y.left > k:
+            ## Recombine between segment and the next
+            self.num_re_events += 1
+            x.next = None
+            y.prev = None
+            while y.left > k:
+                self.num_re_events += 1
                 ix = (ix + 1) % 2
                 k = k + np.random.exponential(1. / self.r)
-                x = z
-            if y is not None:
-                while y.left > k:
-                    ix = (ix + 1) % 2
-                    k = k + np.random.exponential(1. / self.r)
-            x = y
+            segs[ix].append(y)
+        x = y
 
         return segs
 
@@ -503,9 +524,6 @@ class Simulator(object):
         alpha = None
         z = None
         while len(H) > 0:
-            print("In merge,", len(H), "segments")
-            for u in pop:
-                assert u.prev is None
             # print("LOOP HEAD")
             # self.print_heaps(H)
             alpha = None
@@ -571,8 +589,6 @@ class Simulator(object):
             # loop tail; update alpha and integrate it into the state.
             if alpha is not None:
                 if z is None:
-                    assert alpha.prev is None
-                    print("Adding", alpha)
                     pop.add(alpha)
                     # self.L.set_value(alpha.index, alpha.right - alpha.left - 1)
                 else:
