@@ -350,7 +350,6 @@ class Simulator(object):
         while sum(pop.get_num_ancestors() for pop in self.P) != 0:
             self.t += 1
             print(self.t)
-            print(self.S)
             print("Recs:", self.num_re_events)
             self.verify()
 
@@ -392,19 +391,19 @@ class Simulator(object):
                         for v in pop:
                             assert v.next is not u
 
-            ## Migration events happen at the rates in the matrix.
-            # for j in range(len(self.P)):
-            #     source_size = self.P[j].get_num_ancestors()
-            #     for k in range(len(self.P)):
-            #         if j == k:
-            #             continue
-            #         mig_rate = source_size * self.migration_matrix[j][k]
-            #         num_migs = np.random.poisson(mig_rate)
-            #         for _ in range(num_migs):
-            #             ##TODO: Find better way to do multiple migrations? +t1
-            #             mig_source = j
-            #             mig_dest = k
-            #             self.migration_event(mig_source, mig_dest)
+            # Migration events happen at the rates in the matrix.
+            for j in range(len(self.P)):
+                source_size = self.P[j].get_num_ancestors()
+                for k in range(len(self.P)):
+                    if j == k:
+                        continue
+                    mig_rate = source_size * self.migration_matrix[j][k]
+                    num_migs = min(np.random.poisson(mig_rate), source_size)
+                    for _ in range(num_migs):
+                        ##TODO: Find better way to do multiple migrations? +t1
+                        mig_source = j
+                        mig_dest = k
+                        self.migration_event(mig_source, mig_dest)
 
 
     def migration_event(self, j, k):
@@ -1275,7 +1274,9 @@ def run_simulate(args):
     nodes_file.seek(0)
     edgesets_file.seek(0)
     ts = msprime.load_text(nodes_file, edgesets_file)
-    process_trees(ts)
+    # process_trees(ts)
+
+    return ts
 
 def add_simulator_arguments(parser):
     parser.add_argument("sample_size", type=int)
@@ -1331,10 +1332,10 @@ def main():
     #
     # args = parser.parse_args()
     # args.runner(args)
-    args = argparse.Namespace(sample_size=10, random_seed=1, num_loci=3e8,
-            num_replicates=1, recombination_rate=1e-8, num_populations=1,
-            migration_rate=0.1, sample_configuration=[10],
-            population_growth_rates=None, population_sizes=[10],
+    args = argparse.Namespace(sample_size=100, random_seed=1, num_loci=1e8,
+            num_replicates=1, recombination_rate=1e-8, num_populations=2,
+            migration_rate=0.05, sample_configuration=[50, 50],
+            population_growth_rates=None, population_sizes=[100, 100],
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
     ts = run_simulate(args)
