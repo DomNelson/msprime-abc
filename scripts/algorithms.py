@@ -373,10 +373,11 @@ class Simulator(object):
                         segs_pair = self.recombine(child)
 
                         ## Collect segments inherited from the same individual
-                        for i, segs in enumerate(segs_pair):
-                            for s in segs:
-                                assert s.prev is None
-                                heapq.heappush(H[i], (s.left, s))
+                        for i, seg in enumerate(segs_pair):
+                            if seg is None:
+                                continue
+                            assert seg.prev is None
+                            heapq.heappush(H[i], (seg.left, seg))
 
                     ## Merge segments
                     for h in H:
@@ -391,16 +392,15 @@ class Simulator(object):
                         for v in pop:
                             assert v.next is not u
 
-            # Migration events happen at the rates in the matrix.
+            ## Migration events happen at the rates in the matrix.
             for j in range(len(self.P)):
                 source_size = self.P[j].get_num_ancestors()
                 for k in range(len(self.P)):
                     if j == k:
                         continue
                     mig_rate = source_size * self.migration_matrix[j][k]
-                    num_migs = min(np.random.poisson(mig_rate), source_size)
+                    num_migs = min(source_size, np.random.poisson(mig_rate))
                     for _ in range(num_migs):
-                        ##TODO: Find better way to do multiple migrations? +t1
                         mig_source = j
                         mig_dest = k
                         self.migration_event(mig_source, mig_dest)
@@ -429,35 +429,52 @@ class Simulator(object):
         direction, by iterating through segment chain starting with x
         """
         k = x.left + np.random.exponential(1. / self.r)
-        segs = [[], []]
-        ix = np.random.randint(2)
-        segs[ix].append(x)
-        y = x.next
+        segs = [x, self.alloc_segment(-1, -1, -1, -1, None, None)]
+        seg_tails = segs[:]
+        ix = 0
 
-        while x.right > k:
-            # Make new segment
-            self.num_re_events += 1
-            z = self.alloc_segment(
-                k, x.right, x.node, x.population, None, x.next)
-            if x.next is not None:
-                x.next.prev = z
-            x.next = None
-            x.right = k
-            segs[ix].append(z)
-            ix = (ix + 1) % 2
-            k = k + np.random.exponential(1. / self.r)
-            x = z
-        if y is not None and y.left > k:
-            ## Recombine between segment and the next
-            self.num_re_events += 1
-            x.next = None
-            y.prev = None
-            while y.left > k:
+        while x is not None:
+            seg_tails[ix] = x
+            y = x.next
+
+            ## If this loop doesn't occur, what happens to x? TODO
+            while x.right > k:
                 self.num_re_events += 1
                 ix = (ix + 1) % 2
+                # Make new segment
+                z = self.alloc_segment(
+                    k, x.right, x.node, x.population, seg_tails[ix], x.next)
+                if x.next is not None:
+                    x.next.prev = z
+                seg_tails[ix].next = z
+                seg_tails[ix] = z
+                x.next = None
+                x.right = k
                 k = k + np.random.exponential(1. / self.r)
-            segs[ix].append(y)
-        x = y
+                x = z
+            if y is not None and y.left > k:
+                ## Recombine between segment and the next
+                self.num_re_events += 1
+                assert seg_tails[ix] == x
+                x.next = None
+                y.prev = None
+                while y.left > k:
+                    self.num_re_events += 1
+                    ix = (ix + 1) % 2
+                    k = k + np.random.exponential(1. / self.r)
+                seg_tails[ix].next = y
+                y.prev = seg_tails[ix]
+                seg_tails[ix] = y
+            x = y
+
+        ## Remove sentinal segment
+        s = segs[1]
+        if segs[1].next is not None:
+            segs[1].next.prev = None
+        segs[1] = segs[1].next
+        self.free_segment(s)
+
+        np.random.shuffle(segs)
 
         return segs
 
