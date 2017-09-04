@@ -359,17 +359,22 @@ class Simulator(object):
                 offspring = bintrees.AVLTree()
                 for i in range(pop.get_num_ancestors()-1, -1, -1):
                     ##TODO: Could only remove if recombination occurs
-                    anc = pop.remove(i)
+                    ##IDEA: Can we recombine before popping?
+                    ## ^^ Then only pop if one of segs_pair is None, or
+                    ## ^^ if common ancestor event occurs
+                    # anc = pop.remove(i)
                     parent = np.random.choice(cur_inds)
                     if parent not in offspring:
                         offspring[parent] = []
-                    offspring[parent].append(anc)
+                    offspring[parent].append(i)
 
                 ## Draw recombinations in children and sort segments by
                 ## inheritance direction
                 for children in offspring.values():
+                    need_merge = True if len(children) > 1 else False
                     H = [[], []]
-                    for child in children:
+                    for i in children:
+                        child = pop._ancestors[i]
                         segs_pair = self.recombine(child)
 
                         ## Collect segments inherited from the same individual
@@ -381,16 +386,7 @@ class Simulator(object):
 
                     ## Merge segments
                     for h in H:
-                        if len(h) == 1:
-                            assert h[0][1].prev is None
-                            pop.add(h[0][1])
-                            continue
                         self.merge_ancestors(h, pop_idx)
-
-                    for u in pop:
-                        assert u.prev is None
-                        for v in pop:
-                            assert v.next is not u
 
             ## Migration events happen at the rates in the matrix.
             for j in range(len(self.P)):
@@ -437,7 +433,6 @@ class Simulator(object):
             seg_tails[ix] = x
             y = x.next
 
-            ## If this loop doesn't occur, what happens to x? TODO
             while x.right > k:
                 self.num_re_events += 1
                 ix = (ix + 1) % 2
@@ -454,7 +449,6 @@ class Simulator(object):
                 x = z
             if y is not None and y.left > k:
                 ## Recombine between segment and the next
-                self.num_re_events += 1
                 assert seg_tails[ix] == x
                 x.next = None
                 y.prev = None
@@ -1351,8 +1345,8 @@ def main():
     # args.runner(args)
     args = argparse.Namespace(sample_size=100, random_seed=1, num_loci=1e8,
             num_replicates=1, recombination_rate=1e-8, num_populations=2,
-            migration_rate=0.05, sample_configuration=[50, 50],
-            population_growth_rates=None, population_sizes=[100, 100],
+            migration_rate=0.5, sample_configuration=[50, 50],
+            population_growth_rates=None, population_sizes=[1000, 1000],
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
     ts = run_simulate(args)
