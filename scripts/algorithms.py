@@ -358,23 +358,21 @@ class Simulator(object):
                 cur_inds = pop.get_ind_range(self.t)
                 offspring = bintrees.AVLTree()
                 for i in range(pop.get_num_ancestors()-1, -1, -1):
-                    ##TODO: Could only remove if recombination occurs
-                    ##IDEA: Can we recombine before popping?
-                    ## ^^ Then only pop if one of segs_pair is None, or
-                    ## ^^ if common ancestor event occurs
-                    # anc = pop.remove(i)
+                    ## Popping every ancestor every generation is inefficient.
+                    ## In the C implementation we store a pointer to the 
+                    ## ancestor so we can pop only if we need to merge
+                    anc = pop.remove(i)
                     parent = np.random.choice(cur_inds)
                     if parent not in offspring:
                         offspring[parent] = []
-                    offspring[parent].append(i)
+                    offspring[parent].append(anc)
 
                 ## Draw recombinations in children and sort segments by
                 ## inheritance direction
                 for children in offspring.values():
                     need_merge = True if len(children) > 1 else False
                     H = [[], []]
-                    for i in children:
-                        child = pop._ancestors[i]
+                    for child in children:
                         segs_pair = self.recombine(child)
 
                         ## Collect segments inherited from the same individual
@@ -425,15 +423,18 @@ class Simulator(object):
         direction, by iterating through segment chain starting with x
         """
         k = x.left + np.random.exponential(1. / self.r)
-        segs = [x, self.alloc_segment(-1, -1, -1, -1, None, None)]
+        segs = [self.alloc_segment(-1, -1, -1, -1, None, None),
+                self.alloc_segment(-1, -1, -1, -1, None, None)]
         seg_tails = segs[:]
-        ix = 0
+        ix = np.random.randint(2)
+        seg_tails[ix].next = x
+        seg_tails[ix] = x
 
         while x is not None:
             seg_tails[ix] = x
             y = x.next
 
-            while x.right > k:
+            if x.right > k:
                 self.num_re_events += 1
                 ix = (ix + 1) % 2
                 # Make new segment
@@ -447,7 +448,7 @@ class Simulator(object):
                 x.right = k
                 k = k + np.random.exponential(1. / self.r)
                 x = z
-            if y is not None and y.left > k:
+            elif x.right < k and y is not None and y.left > k:
                 ## Recombine between segment and the next
                 assert seg_tails[ix] == x
                 x.next = None
@@ -459,16 +460,18 @@ class Simulator(object):
                 seg_tails[ix].next = y
                 y.prev = seg_tails[ix]
                 seg_tails[ix] = y
-            x = y
+                x = y
+            else:
+                ## No recombination between x.right and y.left
+                x = y
 
-        ## Remove sentinal segment
-        s = segs[1]
-        if segs[1].next is not None:
-            segs[1].next.prev = None
-        segs[1] = segs[1].next
-        self.free_segment(s)
-
-        np.random.shuffle(segs)
+        ## Remove sentinal segments
+        for i in range(len(segs)):
+            s = segs[i]
+            if segs[i].next is not None:
+                segs[i].next.prev = None
+            segs[i] = segs[i].next
+            self.free_segment(s)
 
         return segs
 
@@ -1346,7 +1349,7 @@ def main():
     args = argparse.Namespace(sample_size=100, random_seed=1, num_loci=1e8,
             num_replicates=1, recombination_rate=1e-8, num_populations=2,
             migration_rate=0.5, sample_configuration=[50, 50],
-            population_growth_rates=None, population_sizes=[1000, 1000],
+            population_growth_rates=None, population_sizes=[100, 100],
             population_size_change=[], population_growth_rate_change=[],
             migration_matrix_element_change=[], bottleneck=[])
     ts = run_simulate(args)
