@@ -423,9 +423,9 @@ class Simulator(object):
         direction, by iterating through segment chain starting with x
         """
         k = x.left + np.random.exponential(1. / self.r)
-        segs = [self.alloc_segment(-1, -1, -1, -1, None, None),
-                self.alloc_segment(-1, -1, -1, -1, None, None)]
-        seg_tails = segs[:]
+        u = self.alloc_segment(-1, -1, -1, -1, None, None)
+        v = self.alloc_segment(-1, -1, -1, -1, None, None)
+        seg_tails = [u, v]
         ix = np.random.randint(2)
         seg_tails[ix].next = x
         seg_tails[ix] = x
@@ -466,14 +466,19 @@ class Simulator(object):
                 x = y
 
         ## Remove sentinal segments
-        for i in range(len(segs)):
-            s = segs[i]
-            if segs[i].next is not None:
-                segs[i].next.prev = None
-            segs[i] = segs[i].next
-            self.free_segment(s)
+        if u.next is not None:
+            u.next.prev = None
+        s = u
+        u = s.next
+        self.free_segment(s)
 
-        return segs
+        if v.next is not None:
+            v.next.prev = None
+        s = v
+        v = s.next
+        self.free_segment(s)
+
+        return u, v
 
 
     def recombination_event(self, x, k):
