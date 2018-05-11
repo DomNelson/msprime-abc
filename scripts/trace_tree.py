@@ -366,7 +366,8 @@ class TreeBuilder(object):
         self.great_anc_node = 0
 
         self.nodes = msprime.NodeTable()
-        self.edgesets = msprime.EdgesetTable()
+        self.edgesets = msprime.EdgeTable()
+        # self.edgesets = msprime.EdgesetTable()
         self.haps_idx = {}
         self.idx_haps = {}
         self.ts = self.tree_sequence()
@@ -383,14 +384,14 @@ class TreeBuilder(object):
             if hap.node not in self.haps_idx:
                 is_sample = np.uint32(hap.time == 0)
 
-                if hap.node == self.great_anc_node:
-                    name = 'great_anc_node'
-                else:
-                    name = ''
+                # if hap.node == self.great_anc_node:
+                #     name = 'great_anc_node'
+                # else:
+                #     name = ''
 
                 self.nodes.add_row(time=hap.time,
                                    population=self.pop_dict[np.abs(hap.node)],
-                                   flags=is_sample, name=name)
+                                   flags=is_sample)#, name=name)
                 self.haps_idx[hap.node] = i
                 self.idx_haps[i] = hap.node
                 i += 1
@@ -403,21 +404,21 @@ class TreeBuilder(object):
         """
         edge_records = []
         for hap in self.haps:
-            children = sorted([self.haps_idx[c] for c in hap.children])
+            for child in sorted([self.haps_idx[c] for c in hap.children]):
 
-            ## Exclude samples and uncoalesced lineages
-            if hap.time > 0 and len(children) > 1:
-                assert hap.active is False
-                assert self.nodes.flags[self.haps_idx[hap.node]] == 0
+                ## Exclude samples and uncoalesced lineages
+                if hap.time > 0:
+                    assert hap.active is False
+                    assert self.nodes.flags[self.haps_idx[hap.node]] == 0
 
-                edge_records.append((hap.left, hap.right,
-                                    self.haps_idx[hap.node],
-                                    hap.time, children, len(children)))
+                    edge_records.append((hap.left, hap.right,
+                                        self.haps_idx[hap.node],
+                                        hap.time, child))
 
         ## Store edgesets data in structured array to simplify sorting
         dtypes = [('left', np.float), ('right', np.float),
                   ('parent', np.int32), ('time', np.float),
-                  ('children', tuple), ('children_length', np.uint32)]
+                  ('child', np.int32)]
 
         ## Ensure arrays are sorted by ascending parent time and increasing
         ## left segment value
@@ -432,14 +433,14 @@ class TreeBuilder(object):
         Adds edges to msprime edgeset object from data in haplotype list
         """
         edge_array = self.hap_array()
-        children = [c for tup in edge_array['children'] for c in tup]
+        # child = [c for tup in edge_array['children'] for c in tup]
 
         ## Construct msprime edgesets table
         self.edgesets.set_columns(left=edge_array['left'],
                  right=edge_array['right'],
                  parent=edge_array['parent'],
-                 children=children,
-                 children_length=edge_array['children_length'])
+                 child=edge_array['child'])#,
+                 # children_length=edge_array['children_length'])
 
 
     def sorted_records(self):
@@ -468,7 +469,8 @@ class TreeBuilder(object):
         self.add_nodes()
         self.add_edges()
 
-        ts = msprime.load_tables(nodes=self.nodes, edgesets=self.edgesets)
+        msprime.sort_tables(nodes=self.nodes, edges=self.edgesets)
+        ts = msprime.load_tables(nodes=self.nodes, edges=self.edgesets)
         ts.simplify()
         samples = [h for h in self.haps if h.time == 0]
         assert len(list(ts.get_samples())) == len(samples)
